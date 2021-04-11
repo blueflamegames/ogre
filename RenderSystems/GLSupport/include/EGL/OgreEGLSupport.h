@@ -34,6 +34,7 @@ THE SOFTWARE.
 #include "OgreGLNativeSupport.h"
 #include <EGL/egl.h>
 #include "OgreEGLWindow.h"
+#include "OgreLogManager.h"
 
 #define ENABLE_EGL_CHECK 0
 
@@ -104,6 +105,8 @@ namespace Ogre {
                                     const NameValuePairList *miscParams = 0) {
                 return NULL;
             }
+
+            GLPBuffer* createPBuffer(PixelComponentType format, size_t width, size_t height) override;
 
             ::EGLConfig getGLConfigFromContext(::EGLContext context);
             ::EGLConfig getGLConfigFromDrawable(::EGLSurface drawable,

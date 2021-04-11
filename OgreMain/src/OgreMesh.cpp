@@ -28,7 +28,6 @@ THE SOFTWARE.
 #include "OgreStableHeaders.h"
 
 #include "OgreSkeletonManager.h"
-#include "OgreIteratorWrappers.h"
 #include "OgreEdgeListBuilder.h"
 #include "OgreAnimation.h"
 #include "OgreAnimationState.h"
@@ -52,8 +51,8 @@ namespace Ogre {
         mBufferManager(0),
         mVertexBufferUsage(HardwareBuffer::HBU_STATIC_WRITE_ONLY),
         mIndexBufferUsage(HardwareBuffer::HBU_STATIC_WRITE_ONLY),
-        mVertexBufferShadowBuffer(true),
-        mIndexBufferShadowBuffer(true),
+        mVertexBufferShadowBuffer(false),
+        mIndexBufferShadowBuffer(false),
         mPreparedForShadowVolumes(false),
         mEdgeListsBuilt(false),
         mAutoBuildEdgeLists(true), // will be set to false by serializers of 1.30 and above
@@ -219,9 +218,6 @@ namespace Ogre {
     }
     void Mesh::loadImpl()
     {
-        MeshSerializer serializer;
-        serializer.setListener(MeshManager::getSingleton().getListener());
-
         // If the only copy is local on the stack, it will be cleaned
         // up reliably in case of exceptions, etc
         DataStreamPtr data(mFreshFromDisk);
@@ -233,7 +229,12 @@ namespace Ogre {
                         "Mesh::loadImpl()");
         }
 
-        serializer.importMesh(data, this);
+        String baseName, strExt;
+        StringUtil::splitBaseFilename(mName, baseName, strExt);
+        auto codec = Codec::getCodec(strExt);
+        OgreAssert(codec, ("No codec found to load "+mName).c_str());
+
+        codec->decode(data, this);
 
         /* check all submeshes to see if their materials should be
            updated.  If the submesh has texture aliases that match those
@@ -463,8 +464,8 @@ namespace Ogre {
         }
         const VertexElement* elemPos = vertexData->vertexDeclaration->findElementBySemantic(VES_POSITION);
         HardwareVertexBufferSharedPtr vbuf = vertexData->vertexBufferBinding->getBuffer(elemPos->getSource());
-        
-        unsigned char* vertex = static_cast<unsigned char*>(vbuf->lock(HardwareBuffer::HBL_READ_ONLY));
+        HardwareBufferLockGuard vertexLock(vbuf, HardwareBuffer::HBL_READ_ONLY);
+        unsigned char* vertex = static_cast<unsigned char*>(vertexLock.pData);
 
         if (!extendOnly){
             // init values
@@ -487,7 +488,6 @@ namespace Ogre {
             radiusSqr = std::max<Real>(radiusSqr, pos.squaredLength());
         }
         outRadius = std::sqrt(radiusSqr);
-        vbuf->unlock();
     }
     //-----------------------------------------------------------------------
     void Mesh::setSkeletonName(const String& skelName)
@@ -538,8 +538,7 @@ namespace Ogre {
     //-----------------------------------------------------------------------
     void Mesh::addBoneAssignment(const VertexBoneAssignment& vertBoneAssign)
     {
-        mBoneAssignments.insert(
-            VertexBoneAssignmentList::value_type(vertBoneAssign.vertexIndex, vertBoneAssign));
+        mBoneAssignments.emplace(vertBoneAssign.vertexIndex, vertBoneAssign);
         mBoneAssignmentsOutOfDate = true;
     }
     //-----------------------------------------------------------------------
@@ -656,8 +655,7 @@ namespace Ogre {
                 for (i = range.first; i != range.second; ++i)
                 {
                     // insert value weight->iterator
-                    weightToAssignmentMap.insert(
-                        WeightIteratorMap::value_type(i->second.weight, i));
+                    weightToAssignmentMap.emplace(i->second.weight, i);
                 }
                 // Reverse iterate over weight map, remove lowest n
                 unsigned short numToRemove = currBones - OGRE_MAX_BLEND_WEIGHTS;
@@ -874,8 +872,8 @@ namespace Ogre {
         VertexBoneAssignmentList::const_iterator i, iend;
         i = boneAssignments.begin();
         iend = boneAssignments.end();
-        unsigned char *pBase = static_cast<unsigned char*>(
-            vbuf->lock(HardwareBuffer::HBL_DISCARD));
+        HardwareBufferLockGuard vertexLock(vbuf, HardwareBuffer::HBL_DISCARD);
+        unsigned char *pBase = static_cast<unsigned char*>(vertexLock.pData);
         // Iterate by vertex
         for (v = 0; v < targetVertexData->vertexCount; ++v)
         {
@@ -971,9 +969,6 @@ namespace Ogre {
             }
             pBase += vbuf->getVertexSize();
         }
-
-        vbuf->unlock();
-
     }
     //---------------------------------------------------------------------
     static Real distLineSegToPoint( const Vector3& line0, const Vector3& line1, const Vector3& pt )
@@ -997,13 +992,14 @@ namespace Ogre {
             const VertexElement* posElem = vertexData->vertexDeclaration->findElementBySemantic(VES_POSITION);
             HardwareVertexBufferSharedPtr vbuf = vertexData->vertexBufferBinding->getBuffer(posElem->getSource());
             // if usage is write only,
-            if ( !vbuf->hasShadowBuffer() && (vbuf->getUsage() & HardwareBuffer::HBU_WRITE_ONLY) )
+            if ( !vbuf->hasShadowBuffer() && (vbuf->getUsage() & HBU_DETAIL_WRITE_ONLY) )
             {
                 // can't do it
                 return Real(0.0f);
             }
             vertexPositions.resize( vertexData->vertexCount );
-            unsigned char* vertex = static_cast<unsigned char*>(vbuf->lock(HardwareBuffer::HBL_READ_ONLY));
+            HardwareBufferLockGuard vertexLock(vbuf, HardwareBuffer::HBL_READ_ONLY);
+            unsigned char* vertex = static_cast<unsigned char*>(vertexLock.pData);
             float* pFloat;
 
             for(size_t i = 0; i < vertexData->vertexCount; ++i)
@@ -1012,7 +1008,6 @@ namespace Ogre {
                 vertexPositions[ i ] = Vector3( pFloat[0], pFloat[1], pFloat[2] );
                 vertex += vbuf->getVertexSize();
             }
-            vbuf->unlock();
         }
         Real maxRadius = Real(0);
         Real minWeight = Real(0.01);
@@ -1120,11 +1115,6 @@ namespace Ogre {
     const String& Mesh::getSkeletonName(void) const
     {
         return mSkeletonName;
-    }
-    //---------------------------------------------------------------------
-    ushort Mesh::getNumLodLevels(void) const
-    {
-        return mNumLods;
     }
     //---------------------------------------------------------------------
     const MeshLodUsage& Mesh::getLodLevel(ushort index) const
@@ -1423,10 +1413,10 @@ namespace Ogre {
                 targetSemantic,
                 index);
             // Now copy the original data across
-            unsigned char* pSrc = static_cast<unsigned char*>(
-                origBuffer->lock(HardwareBuffer::HBL_READ_ONLY));
-            unsigned char* pDest = static_cast<unsigned char*>(
-                newBuffer->lock(HardwareBuffer::HBL_DISCARD));
+            HardwareBufferLockGuard srcLock(origBuffer, HardwareBuffer::HBL_READ_ONLY);
+            HardwareBufferLockGuard dstLock(newBuffer, HardwareBuffer::HBL_DISCARD);
+            unsigned char* pSrc = static_cast<unsigned char*>(srcLock.pData);
+            unsigned char* pDest = static_cast<unsigned char*>(dstLock.pData);
             size_t vertSize = origBuffer->getVertexSize();
             for (size_t v = 0; v < vertexData->vertexCount; ++v)
             {
@@ -1438,8 +1428,6 @@ namespace Ogre {
                 memset(pDest, 0, sizeof(float)*3);
                 pDest += sizeof(float)*3;
             }
-            origBuffer->unlock();
-            newBuffer->unlock();
 
             // Rebind the new buffer
             vBind->setBinding(prevTexCoordElem->getSource(), newBuffer);
@@ -1985,51 +1973,52 @@ namespace Ogre {
             destNormStride = destNormBuf->getVertexSize();
         }
 
-        void* pBuffer;
-
         // Lock source buffers for reading
-        pBuffer = srcPosBuf->lock(HardwareBuffer::HBL_READ_ONLY);
-        srcElemPos->baseVertexPointerToElement(pBuffer, &pSrcPos);
+        HardwareBufferLockGuard srcPosLock(srcPosBuf, HardwareBuffer::HBL_READ_ONLY);
+        srcElemPos->baseVertexPointerToElement(srcPosLock.pData, &pSrcPos);
+        HardwareBufferLockGuard srcNormLock;
         if (includeNormals)
         {
             if (srcNormBuf != srcPosBuf)
             {
                 // Different buffer
-                pBuffer = srcNormBuf->lock(HardwareBuffer::HBL_READ_ONLY);
+                srcNormLock.lock(srcNormBuf, HardwareBuffer::HBL_READ_ONLY);
             }
-            srcElemNorm->baseVertexPointerToElement(pBuffer, &pSrcNorm);
+            srcElemNorm->baseVertexPointerToElement(srcNormBuf != srcPosBuf ? srcNormLock.pData : srcPosLock.pData, &pSrcNorm);
         }
 
         // Indices must be 4 bytes
         assert(srcElemBlendIndices->getType() == VET_UBYTE4 &&
                "Blend indices must be VET_UBYTE4");
-        pBuffer = srcIdxBuf->lock(HardwareBuffer::HBL_READ_ONLY);
-        srcElemBlendIndices->baseVertexPointerToElement(pBuffer, &pBlendIdx);
+        HardwareBufferLockGuard srcIdxLock(srcIdxBuf, HardwareBuffer::HBL_READ_ONLY);
+        srcElemBlendIndices->baseVertexPointerToElement(srcIdxLock.pData, &pBlendIdx);
+        HardwareBufferLockGuard srcWeightLock;
         if (srcWeightBuf != srcIdxBuf)
         {
             // Lock buffer
-            pBuffer = srcWeightBuf->lock(HardwareBuffer::HBL_READ_ONLY);
+            srcWeightLock.lock(srcWeightBuf, HardwareBuffer::HBL_READ_ONLY);
         }
-        srcElemBlendWeights->baseVertexPointerToElement(pBuffer, &pBlendWeight);
+        srcElemBlendWeights->baseVertexPointerToElement(srcWeightBuf != srcIdxBuf ? srcWeightLock.pData : srcIdxLock.pData, &pBlendWeight);
         unsigned short numWeightsPerVertex =
             VertexElement::getTypeCount(srcElemBlendWeights->getType());
 
 
         // Lock destination buffers for writing
-        pBuffer = destPosBuf->lock(
+        HardwareBufferLockGuard destPosLock(destPosBuf,
             (destNormBuf != destPosBuf && destPosBuf->getVertexSize() == destElemPos->getSize()) ||
             (destNormBuf == destPosBuf && destPosBuf->getVertexSize() == destElemPos->getSize() + destElemNorm->getSize()) ?
             HardwareBuffer::HBL_DISCARD : HardwareBuffer::HBL_NORMAL);
-        destElemPos->baseVertexPointerToElement(pBuffer, &pDestPos);
+        destElemPos->baseVertexPointerToElement(destPosLock.pData, &pDestPos);
+        HardwareBufferLockGuard destNormLock;
         if (includeNormals)
         {
             if (destNormBuf != destPosBuf)
             {
-                pBuffer = destNormBuf->lock(
+                destNormLock.lock(destNormBuf,
                     destNormBuf->getVertexSize() == destElemNorm->getSize() ?
                     HardwareBuffer::HBL_DISCARD : HardwareBuffer::HBL_NORMAL);
             }
-            destElemNorm->baseVertexPointerToElement(pBuffer, &pDestNorm);
+            destElemNorm->baseVertexPointerToElement(destNormBuf != destPosBuf ? destNormLock.pData : destPosLock.pData, &pDestNorm);
         }
 
         OptimisedUtil::getImplementation()->softwareVertexSkinning(
@@ -2042,25 +2031,6 @@ namespace Ogre {
             blendWeightStride, blendIdxStride,
             numWeightsPerVertex,
             targetVertexData->vertexCount);
-
-        // Unlock source buffers
-        srcPosBuf->unlock();
-        srcIdxBuf->unlock();
-        if (srcWeightBuf != srcIdxBuf)
-        {
-            srcWeightBuf->unlock();
-        }
-        if (includeNormals && srcNormBuf != srcPosBuf)
-        {
-            srcNormBuf->unlock();
-        }
-        // Unlock destination buffers
-        destPosBuf->unlock();
-        if (includeNormals && destNormBuf != destPosBuf)
-        {
-            destNormBuf->unlock();
-        }
-
     }
     //---------------------------------------------------------------------
     void Mesh::softwareVertexMorph(Real t,
@@ -2068,11 +2038,14 @@ namespace Ogre {
         const HardwareVertexBufferSharedPtr& b2,
         VertexData* targetVertexData)
     {
-        float* pb1 = static_cast<float*>(b1->lock(HardwareBuffer::HBL_READ_ONLY));
+        HardwareBufferLockGuard b1Lock(b1, HardwareBuffer::HBL_READ_ONLY);
+        float* pb1 = static_cast<float*>(b1Lock.pData);
+        HardwareBufferLockGuard b2Lock;
         float* pb2;
         if (b1.get() != b2.get())
         {
-            pb2 = static_cast<float*>(b2->lock(HardwareBuffer::HBL_READ_ONLY));
+            b2Lock.lock(b2, HardwareBuffer::HBL_READ_ONLY);
+            pb2 = static_cast<float*>(b2Lock.pData);
         }
         else
         {
@@ -2099,19 +2072,14 @@ namespace Ogre {
         assert((posElem->getSize() == destBuf->getVertexSize()
                 || (morphNormals && posElem->getSize() + normElem->getSize() == destBuf->getVertexSize())) &&
             "Positions (or positions & normals) must be in a buffer on their own for morphing");
-        float* pdst = static_cast<float*>(
-            destBuf->lock(HardwareBuffer::HBL_DISCARD));
+        HardwareBufferLockGuard destLock(destBuf, HardwareBuffer::HBL_DISCARD);
+        float* pdst = static_cast<float*>(destLock.pData);
 
         OptimisedUtil::getImplementation()->softwareVertexMorph(
             t, pb1, pb2, pdst,
             b1->getVertexSize(), b2->getVertexSize(), destBuf->getVertexSize(),
             targetVertexData->vertexCount,
             morphNormals);
-
-        destBuf->unlock();
-        b1->unlock();
-        if (b1.get() != b2.get())
-            b2->unlock();
     }
     //---------------------------------------------------------------------
     void Mesh::softwareVertexPoseBlend(Real weight,
@@ -2137,8 +2105,8 @@ namespace Ogre {
         size_t elemsPerVertex = destBuf->getVertexSize()/sizeof(float);
 
         // Have to lock in normal mode since this is incremental
-        float* pBase = static_cast<float*>(
-            destBuf->lock(HardwareBuffer::HBL_NORMAL));
+        HardwareBufferLockGuard destLock(destBuf, HardwareBuffer::HBL_NORMAL);
+        float* pBase = static_cast<float*>(destLock.pData);
                 
         // Iterate over affected vertices
         for (std::map<size_t, Vector3>::const_iterator i = vertexOffsetMap.begin();
@@ -2175,7 +2143,6 @@ namespace Ogre {
                 
             }
         }
-        destBuf->unlock();
     }
     //---------------------------------------------------------------------
     size_t Mesh::calculateSize(void) const
@@ -2261,15 +2228,12 @@ namespace Ogre {
 
         // Scan all animations and determine the type of animation tracks
         // relating to each vertex data
-        for(AnimationList::const_iterator ai = mAnimationsList.begin();
-            ai != mAnimationsList.end(); ++ai)
+        for(const auto& ai : mAnimationsList)
         {
-            Animation* anim = ai->second;
-            Animation::VertexTrackIterator vit = anim->getVertexTrackIterator();
-            while (vit.hasMoreElements())
+            for (const auto& vit : ai.second->_getVertexTrackList())
             {
-                VertexAnimationTrack* track = vit.getNext();
-                ushort handle = track->getHandle();
+                VertexAnimationTrack* track = vit.second;
+                ushort handle = vit.first;
                 if (handle == 0)
                 {
                     // shared data

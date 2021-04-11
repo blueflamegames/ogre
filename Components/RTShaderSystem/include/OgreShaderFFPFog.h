@@ -30,7 +30,7 @@ THE SOFTWARE.
 #include "OgreShaderPrerequisites.h"
 #ifdef RTSHADER_SYSTEM_BUILD_CORE_SHADERS
 #include "OgreShaderSubRenderState.h"
-#include "OgreVector4.h"
+#include "OgreVector.h"
 
 namespace Ogre {
 namespace RTShader {
@@ -76,7 +76,7 @@ public:
     /** 
     @see SubRenderState::updateGpuProgramsParams.
     */
-    virtual void updateGpuProgramsParams(Renderable* rend, Pass* pass, const AutoParamDataSource* source, const LightList* pLightList);
+    virtual void updateGpuProgramsParams(Renderable* rend, const Pass* pass, const AutoParamDataSource* source, const LightList* pLightList);
 
     /** 
     @see SubRenderState::copyFrom.
@@ -108,6 +108,8 @@ public:
     @param calcMode The calculation mode to set.
     */
     void setCalcMode(CalcMode calcMode) { mCalcMode = calcMode; }
+
+    bool setParameter(const String& name, const String& value) override;
 
     /** 
     Return the current calculation mode.
@@ -147,14 +149,12 @@ protected:
     // True if the fog parameters should be taken from the pass.
     bool mPassOverrideParams;
 
-    // World view projection parameter.     
-    UniformParameterPtr mWorldViewProjMatrix;
     // Fog colour parameter.    
     UniformParameterPtr mFogColour;
     // Fog parameters program parameter.    
     UniformParameterPtr mFogParams;
-    // Vertex shader input position parameter.
-    ParameterPtr mVSInPos;
+    // Vertex shader output position parameter.
+    ParameterPtr mVSOutPos;
     // Vertex shader output fog colour parameter.
     ParameterPtr mVSOutFogFactor;
     // Pixel shader input fog factor.

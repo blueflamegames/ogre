@@ -30,7 +30,7 @@ THE SOFTWARE.
 
 #include "OgrePrerequisites.h"
 
-#include "OgreVector3.h"
+#include "OgreVector.h"
 #include "OgreParticleIterator.h"
 #include "OgreStringInterface.h"
 #include "OgreMovableObject.h"
@@ -347,13 +347,16 @@ namespace Ogre {
         */
         void _update(Real timeElapsed);
 
-        /** Returns an iterator for stepping through all particles in this system.
+        /** Returns all active particles in this system.
         @remarks
             This method is designed to be used by people providing new ParticleAffector subclasses,
             this is the easiest way to step through all the particles in a system and apply the
             changes the affector wants to make.
         */
-        ParticleIterator _getIterator(void);
+        const std::list<Particle*>& _getActiveParticles() { return mActiveParticles; }
+
+        /// @deprecated use _getActiveParticles()
+        OGRE_DEPRECATED ParticleIterator _getIterator(void);
 
         /** Sets the name of the material to be used for this billboard set.
         */
@@ -364,35 +367,11 @@ namespace Ogre {
         */
         virtual const String& getMaterialName(void) const;
 
-        /** Overridden from MovableObject
-            @see
-                MovableObject
-        */
-        virtual void _notifyCurrentCamera(Camera* cam);
-
-        /** Overridden from MovableObject
-        @see
-        MovableObject
-        */
-        void _notifyAttached(Node* parent, bool isTagPoint = false);
-
-        /** Overridden from MovableObject
-            @see
-                MovableObject
-        */
-        virtual const AxisAlignedBox& getBoundingBox(void) const { return mAABB; }
-
-        /** Overridden from MovableObject
-            @see
-                MovableObject
-        */
-        virtual Real getBoundingRadius(void) const { return mBoundingRadius; }
-
-        /** Overridden from MovableObject
-            @see
-                MovableObject
-        */
-        virtual void _updateRenderQueue(RenderQueue* queue);
+        virtual void _notifyCurrentCamera(Camera* cam) override;
+        void _notifyAttached(Node* parent, bool isTagPoint = false) override;
+        virtual const AxisAlignedBox& getBoundingBox(void) const override { return mAABB; }
+        virtual Real getBoundingRadius(void) const override { return mBoundingRadius; }
+        virtual void _updateRenderQueue(RenderQueue* queue) override;
 
         /// @copydoc MovableObject::visitRenderables
         void visitRenderables(Renderable::Visitor* visitor, 
@@ -484,16 +463,12 @@ namespace Ogre {
         */
         static Real getDefaultNonVisibleUpdateTimeout(void) { return msDefaultNonvisibleTimeout; }
 
-        /** Overridden from MovableObject */
-        const String& getMovableType(void) const;
+        const String& getMovableType(void) const override;
 
-        /** Internal callback used by Particles to notify their parent that they have been resized.
-        */
-        virtual void _notifyParticleResized(void);
-
-        /** Internal callback used by Particles to notify their parent that they have been rotated.
-        */
-        virtual void _notifyParticleRotated(void);
+        /// @deprecated do not use
+        OGRE_DEPRECATED virtual void _notifyParticleResized() {}
+        /// @deprecated do not use
+        OGRE_DEPRECATED virtual void _notifyParticleRotated() {}
 
         /** Sets the default dimensions of the particles in this set.
             @remarks

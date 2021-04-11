@@ -46,8 +46,11 @@ THE SOFTWARE.
 #   define strnicmp strncasecmp
 #endif
 
+#if OGRE_PLATFORM == OGRE_PLATFORM_ANDROID || OGRE_PLATFORM == OGRE_PLATFORM_EMSCRIPTEN || \
+	(OGRE_PLATFORM == OGRE_PLATFORM_LINUX && OGRE_NO_LOCALE_STRCONVERT == 1)
 #if OGRE_PLATFORM == OGRE_PLATFORM_ANDROID || OGRE_PLATFORM == OGRE_PLATFORM_EMSCRIPTEN
 #   define locale_t int
+#endif
 #   define strtod_l(ptr, end, l) strtod(ptr, end)
 #   define strtoul_l(ptr, end, base, l) strtoul(ptr, end, base)
 #   define strtol_l(ptr, end, base, l) strtol(ptr, end, base)
@@ -81,8 +84,8 @@ namespace Ogre {
     class _OgreExport StringUtil
     {
     public:
-        OGRE_DEPRECATED static const String& BLANK; /// @deprecated use Ogre::BLANKSTRING instead
-        OGRE_DEPRECATED typedef StringStream StrStreamType; /// @deprecated use Ogre::StringStream instead
+        OGRE_DEPRECATED static const String& BLANK; //!< @deprecated use Ogre::BLANKSTRING instead
+        OGRE_DEPRECATED typedef StringStream StrStreamType; //!< @deprecated use Ogre::StringStream instead
 
         /** Removes any whitespace characters, be it standard space or
             TABs and so on.
@@ -109,12 +112,12 @@ namespace Ogre {
         /** Returns a StringVector that contains all the substrings delimited
             by the characters in the passed <code>delims</code> argument,
             or in the <code>doubleDelims</code> argument, which is used to include (normal)
-            delimeters in the tokenised string. For example, "strings like this".
+            delimiters in the tokenised string. For example, "strings like this".
             @param str
             @param
             delims A list of delimiter characters to split by
             @param
-            doubleDelims A list of double delimeters characters to tokenise by
+            doubleDelims A list of double delimiters characters to tokenise by
             @param
             maxSplits The maximum number of splits to perform (0 for unlimited splits). If this
             parameters is > 0, the splitting process will stop after this many splits, left to right.

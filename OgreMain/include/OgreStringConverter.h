@@ -34,7 +34,7 @@ THE SOFTWARE.
 #include "OgreStringVector.h"
 #include "OgreColourValue.h"
 #include "OgreMatrix4.h"
-#include "OgreVector2.h"
+#include "OgreVector.h"
 
 namespace Ogre {
 
@@ -115,7 +115,8 @@ namespace Ogre {
             unsigned short width, char fill = ' ',
             std::ios::fmtflags flags = std::ios::fmtflags(0));
 
-        /** Converts a boolean to a String. 
+        /** Converts a boolean to a String.
+        @param val
         @param yesNo If set to true, result is 'yes' or 'no' instead of 'true' or 'false'
         */
         static String toString(bool val, bool yesNo = false);
@@ -325,17 +326,11 @@ namespace Ogre {
         static bool isNumber(const String& val);
 
 
-		/** Converts a ColourBufferType to a String.
-		@remarks
-			String output format is "Back", "Back Left", "Back Right", etc.
-		*/
-		static String toString(ColourBufferType val);
+		/// @deprecated
+		OGRE_DEPRECATED static String toString(ColourBufferType val);
 
-		/** Converts a String to a ColourBufferType.
-		@remarks
-			String input format should be "Back", "Back Left", "Back Right", etc.
-		*/
-		static ColourBufferType parseColourBuffer(const String& val, ColourBufferType defaultValue = CBT_BACK);
+		/// @deprecated
+		OGRE_DEPRECATED static ColourBufferType parseColourBuffer(const String& val, ColourBufferType defaultValue = CBT_BACK);
 
 		/** Converts a StereoModeType to a String
 		@remarks
@@ -354,9 +349,16 @@ namespace Ogre {
         template<typename T>
         static String _toString(T val, uint16 width, char fill, std::ios::fmtflags flags);
     };
-    /** @} */
-    /** @} */
 
+    inline String to_string(const Quaternion& v) { return StringConverter::toString(v); }
+    inline String to_string(const ColourValue& v) { return StringConverter::toString(v); }
+    inline String to_string(const Vector2& v) { return StringConverter::toString(v); }
+    inline String to_string(const Vector3& v) { return StringConverter::toString(v); }
+    inline String to_string(const Vector4& v) { return StringConverter::toString(v); }
+    inline String to_string(const Matrix3& v) { return StringConverter::toString(v); }
+    inline String to_string(const Matrix4& v) { return StringConverter::toString(v); }
+    /** @} */
+    /** @} */
 }
 
 

@@ -39,10 +39,9 @@ THE SOFTWARE.
 #include "OgreMeshManager.h"
 #include "OgreSceneManagerEnumerator.h"
 #include "OgreD3D11HardwareBufferManager.h"
-#include "OgreD3D11HardwareIndexBuffer.h"
-#include "OgreD3D11HardwareVertexBuffer.h"
+#include "OgreD3D11HardwareBuffer.h"
 #include "OgreD3D11VertexDeclaration.h"
-#include "OgreD3D11GpuProgramManager.h"
+#include "OgreGpuProgramManager.h"
 #include "OgreD3D11HLSLProgramFactory.h"
 
 #include "OgreD3D11HardwareOcclusionQuery.h"
@@ -52,6 +51,7 @@ THE SOFTWARE.
 
 #include "OgreD3D11DepthBuffer.h"
 #include "OgreD3D11HardwarePixelBuffer.h"
+#include "OgreD3D11RenderTarget.h"
 #include "OgreException.h"
 
 #if OGRE_NO_QUAD_BUFFER_STEREO == 0
@@ -239,7 +239,15 @@ namespace Ogre
 		// This flag is required in order to enable compatibility with Direct2D.
 		deviceFlags |= D3D11_CREATE_DEVICE_BGRA_SUPPORT;
 #endif
-		if(OGRE_DEBUG_MODE && !IsWorkingUnderNsight() && D3D11Device::D3D_NO_EXCEPTION != D3D11Device::getExceptionsErrorLevel())
+
+        auto it = mOptions.find("Debug Layer");
+        bool debugEnabled = false;
+        if (it != mOptions.end())
+        {
+            debugEnabled = StringConverter::parseBool(it->second.currentValue);
+        }
+
+		if(debugEnabled && !IsWorkingUnderNsight() && D3D11Device::D3D_NO_EXCEPTION != D3D11Device::getExceptionsErrorLevel())
 		{
 			deviceFlags |= D3D11_CREATE_DEVICE_DEBUG;
 		}
@@ -305,7 +313,6 @@ namespace Ogre
 
         ConfigOption optDevice;
         ConfigOption optVideoMode;
-        ConfigOption optVSyncInterval;
 		ConfigOption optBackBufferCount;
         ConfigOption optAA;
         ConfigOption optFPUMode;
@@ -329,14 +336,6 @@ namespace Ogre
         optVideoMode.name = "Video Mode";
         optVideoMode.currentValue = "800 x 600 @ 32-bit colour";
         optVideoMode.immutable = false;
-
-        optVSyncInterval.name = "VSync Interval";
-        optVSyncInterval.immutable = false;
-        optVSyncInterval.possibleValues.push_back( "1" );
-        optVSyncInterval.possibleValues.push_back( "2" );
-        optVSyncInterval.possibleValues.push_back( "3" );
-        optVSyncInterval.possibleValues.push_back( "4" );
-        optVSyncInterval.currentValue = "1";
 
 		optBackBufferCount.name = "Backbuffer Count";
 		optBackBufferCount.immutable = false;
@@ -431,7 +430,6 @@ namespace Ogre
 
         mOptions[optDevice.name] = optDevice;
         mOptions[optVideoMode.name] = optVideoMode;
-        mOptions[optVSyncInterval.name] = optVSyncInterval;
         mOptions[optAA.name] = optAA;
         mOptions[optFPUMode.name] = optFPUMode;
         mOptions[optNVPerfHUD.name] = optNVPerfHUD;
@@ -442,7 +440,21 @@ namespace Ogre
 
 		mOptions[optBackBufferCount.name] = optBackBufferCount;
 
-        
+        ConfigOption opt;
+        opt.name = "Reversed Z-Buffer";
+        opt.possibleValues = {"No", "Yes"};
+        opt.currentValue = opt.possibleValues[0];
+        opt.immutable = false;
+
+        mOptions[opt.name] = opt;
+
+        opt.name = "Debug Layer";
+        opt.possibleValues = {"Off", "On"};
+        opt.currentValue = opt.possibleValues[0];
+        opt.immutable = false;
+
+        mOptions[opt.name] = opt;
+
         refreshD3DSettings();
 
     }
@@ -536,6 +548,9 @@ namespace Ogre
 #endif
         }
 
+        if(name == "Reversed Z-Buffer")
+            mIsReverseDepthBufferEnabled = StringConverter::parseBool(value);
+
         if( name == "Allow NVPerfHUD" )
         {
             if (value == "Yes")
@@ -571,28 +586,16 @@ namespace Ogre
             // set maskable levels supported
             for (unsigned int n = 1; n <= D3D11_MAX_MULTISAMPLE_SAMPLE_COUNT; n++)
             {
-                HRESULT hr = device->CheckMultisampleQualityLevels(format, n, &numLevels);
-                if (SUCCEEDED(hr) && numLevels > 0)
-                {
-                    optFSAA->possibleValues.push_back(StringConverter::toString(n));
-
-                    // 8x could mean 8xCSAA, and we need other designation for 8xMSAA
-                    if(n == 8 && SUCCEEDED(device->CheckMultisampleQualityLevels(format, 4, &numLevels)) && numLevels > 8    // 8x CSAA
-                    || n == 16 && SUCCEEDED(device->CheckMultisampleQualityLevels(format, 4, &numLevels)) && numLevels > 16  // 16x CSAA
-                    || n == 16 && SUCCEEDED(device->CheckMultisampleQualityLevels(format, 8, &numLevels)) && numLevels > 16) // 16xQ CSAA
-                    {
-                        optFSAA->possibleValues.push_back(StringConverter::toString(n) + " [Quality]");
-                    }
-                }
-                else if(n == 16) // there could be case when 16xMSAA is not supported but 16xCSAA and may be 16xQ CSAA are supported
-                {
-                    bool csaa16x = SUCCEEDED(device->CheckMultisampleQualityLevels(format, 4, &numLevels)) && numLevels > 16;
-                    bool csaa16xQ = SUCCEEDED(device->CheckMultisampleQualityLevels(format, 8, &numLevels)) && numLevels > 16;
-                    if(csaa16x || csaa16xQ)
-                        optFSAA->possibleValues.push_back("16");
-                    if(csaa16x && csaa16xQ)
-                        optFSAA->possibleValues.push_back("16 [Quality]");
-                }
+                // new style enumeration, with AMD EQAA names. NVidia CSAA names are misleading
+                // see determineFSAASettings for references
+                if(n == 8 && SUCCEEDED(device->CheckMultisampleQualityLevels(format, 4, &numLevels)) && numLevels > 8)
+                    optFSAA->possibleValues.push_back("4f8"); // 8x CSAA
+                if(n == 16 && SUCCEEDED(device->CheckMultisampleQualityLevels(format, 4, &numLevels)) && numLevels > 16)
+                    optFSAA->possibleValues.push_back("4f16"); // 16x CSAA
+                if(n == 16 && SUCCEEDED(device->CheckMultisampleQualityLevels(format, 8, &numLevels)) && numLevels > 16)
+                    optFSAA->possibleValues.push_back("8f16"); // 16xQ CSAA
+                if (SUCCEEDED(device->CheckMultisampleQualityLevels(format, n, &numLevels)) && numLevels > 0)
+                    optFSAA->possibleValues.push_back(std::to_string(n)); // Nx MSAA
             }
         }
 
@@ -634,9 +637,11 @@ namespace Ogre
         return BLANKSTRING;
     }
     //---------------------------------------------------------------------
-    RenderWindow* D3D11RenderSystem::_initialise( bool autoCreateWindow, const String& windowTitle )
+    void D3D11RenderSystem::_initialise()
     {
-        RenderWindow* autoWindow = NULL;
+        // call superclass method
+        RenderSystem::_initialise();
+
         LogManager::getSingleton().logMessage( "D3D11: Subsystem Initialising" );
 
 		if(IsWorkingUnderNsight())
@@ -668,111 +673,11 @@ namespace Ogre
         // create the device for the selected adapter
         createDevice();
 
-        if( autoCreateWindow )
-        {
-            bool fullScreen;
-            opt = mOptions.find( "Full Screen" );
-            if( opt == mOptions.end() )
-                OGRE_EXCEPT( Exception::ERR_INTERNAL_ERROR, "Can't find full screen option!", "D3D11RenderSystem::initialise" );
-            fullScreen = opt->second.currentValue == "Yes";
-
-            D3D11VideoMode* videoMode = NULL;
-            unsigned int width, height;
-            String temp;
-
-            opt = mOptions.find( "Video Mode" );
-            if( opt == mOptions.end() )
-                OGRE_EXCEPT( Exception::ERR_INTERNAL_ERROR, "Can't find Video Mode option!", "D3D11RenderSystem::initialise" );
-
-            // The string we are manipulating looks like this :width x height @ colourDepth
-            // Pull out the colour depth by getting what comes after the @ and a space
-            String colourDepth = opt->second.currentValue.substr(opt->second.currentValue.rfind('@')+1);
-            // Now we know that the width starts a 0, so if we can find the end we can parse that out
-            String::size_type widthEnd = opt->second.currentValue.find(' ');
-            // we know that the height starts 3 characters after the width and goes until the next space
-            String::size_type heightEnd = opt->second.currentValue.find(' ', widthEnd+3);
-            // Now we can parse out the values
-            width = StringConverter::parseInt(opt->second.currentValue.substr(0, widthEnd));
-            height = StringConverter::parseInt(opt->second.currentValue.substr(widthEnd+3, heightEnd));
-
-            D3D11VideoModeList* videoModeList = mActiveD3DDriver.getVideoModeList();
-            for( unsigned j=0; j < videoModeList->count(); j++ )
-            {
-                temp = videoModeList->item(j)->getDescription();
-
-                // In full screen we only want to allow supported resolutions, so temp and opt->second.currentValue need to 
-                // match exactly, but in windowed mode we can allow for arbitrary window sized, so we only need
-                // to match the colour values
-                if(fullScreen && (temp == opt->second.currentValue) ||
-                  !fullScreen && (temp.substr(temp.rfind('@')+1) == colourDepth))
-                {
-                    videoMode = videoModeList->item(j);
-                    break;
-                }
-            }
-
-            // sRGB window option
-            bool hwGamma = false;
-            opt = mOptions.find( "sRGB Gamma Conversion" );
-            if( opt == mOptions.end() )
-                OGRE_EXCEPT( Exception::ERR_INTERNAL_ERROR, "Can't find sRGB option!", "D3D11RenderSystem::initialise" );
-            hwGamma = opt->second.currentValue == "Yes";
-            uint fsaa = 0;
-            String fsaaHint;
-            if( (opt = mOptions.find("FSAA")) != mOptions.end() )
-            {
-                StringVector values = StringUtil::split(opt->second.currentValue, " ", 1);
-                fsaa = StringConverter::parseUnsignedInt(values[0]);
-                if (values.size() > 1)
-                    fsaaHint = values[1];
-            }
-
-            if( !videoMode )
-            {
-                LogManager::getSingleton().logWarning(
-                            "D3D11: Couldn't find requested video mode. Forcing 32bpp. "
-                            "If you have two GPUs and you're rendering to the GPU that is not "
-                            "plugged to the monitor you can then ignore this message.");
-            }
-
-            NameValuePairList miscParams;
-            miscParams["colourDepth"] = StringConverter::toString(videoMode ? videoMode->getColourDepth() : 32);
-            miscParams["FSAA"] = StringConverter::toString(fsaa);
-            miscParams["FSAAHint"] = fsaaHint;
-            miscParams["useNVPerfHUD"] = StringConverter::toString(mUseNVPerfHUD);
-            miscParams["gamma"] = StringConverter::toString(hwGamma);
-            //miscParams["useFlipMode"] = StringConverter::toString(true);
-
-            opt = mOptions.find("VSync");
-            if (opt == mOptions.end())
-                OGRE_EXCEPT(Exception::ERR_INVALIDPARAMS, "Can't find VSync options!", "D3D11RenderSystem::initialise");
-            bool vsync = (opt->second.currentValue == "Yes");
-            miscParams["vsync"] = StringConverter::toString(vsync);
-
-            opt = mOptions.find("VSync Interval");
-            if (opt == mOptions.end())
-                OGRE_EXCEPT(Exception::ERR_INVALIDPARAMS, "Can't find VSync Interval options!", "D3D11RenderSystem::initialise");
-            miscParams["vsyncInterval"] = opt->second.currentValue;
-
-            autoWindow = this->_createRenderWindow( windowTitle, width, height, 
-                fullScreen, &miscParams );         
-        }
-
         LogManager::getSingleton().logMessage("***************************************");
         LogManager::getSingleton().logMessage("*** D3D11: Subsystem Initialized OK ***");
         LogManager::getSingleton().logMessage("***************************************");
 
-        // call superclass method
-        RenderSystem::_initialise( autoCreateWindow );
         this->fireDeviceEvent(&mDevice, "DeviceCreated");
-        return autoWindow;
-    }
-    //---------------------------------------------------------------------
-    void D3D11RenderSystem::reinitialise()
-    {
-        LogManager::getSingleton().logMessage( "D3D11: Reinitializing" );
-        this->shutdown();
-    //  this->initialise( true );
     }
     //---------------------------------------------------------------------
     void D3D11RenderSystem::shutdown()
@@ -789,14 +694,19 @@ namespace Ogre
         LogManager::getSingleton().logMessage("D3D11: Shutting down cleanly.");
         SAFE_DELETE( mTextureManager );
         SAFE_DELETE( mHardwareBufferManager );
-        SAFE_DELETE( mGpuProgramManager );
 
+        if(mGpuProgramManager)
+        {
+            ResourceGroupManager::getSingleton()._unregisterResourceManager(mGpuProgramManager->getResourceType());
+            SAFE_DELETE( mGpuProgramManager );
+        }
     }
     //---------------------------------------------------------------------
 	RenderWindow* D3D11RenderSystem::_createRenderWindow(const String &name,
 		unsigned int width, unsigned int height, bool fullScreen,
 		const NameValuePairList *miscParams)
 	{
+        RenderSystem::_createRenderWindow(name, width, height, fullScreen, miscParams);
 
 		// Check we're not creating a secondary window when the primary
 		// was fullscreen
@@ -805,36 +715,6 @@ namespace Ogre
 			OGRE_EXCEPT(Exception::ERR_INVALID_STATE,
 				"Cannot create secondary windows not in full screen when the primary is full screen",
 				"D3D11RenderSystem::_createRenderWindow");
-		}
-
-		// Log a message
-		StringStream ss;
-		ss << "D3D11RenderSystem::_createRenderWindow \"" << name << "\", " <<
-			width << "x" << height << " ";
-		if (fullScreen)
-			ss << "fullscreen ";
-		else
-			ss << "windowed ";
-		if (miscParams)
-		{
-			ss << " miscParams: ";
-			NameValuePairList::const_iterator it;
-			for (it = miscParams->begin(); it != miscParams->end(); ++it)
-			{
-				ss << it->first << "=" << it->second << " ";
-			}
-			LogManager::getSingleton().logMessage(ss.str());
-		}
-
-		String msg;
-
-		// Make sure we don't already have a render target of the 
-		// sam name as the one supplied
-		if (mRenderTargets.find(name) != mRenderTargets.end())
-		{
-			msg = "A render target of the same name '" + name + "' already "
-				"exists.  You cannot create a new window with this name.";
-			OGRE_EXCEPT(Exception::ERR_INTERNAL_ERROR, msg, "D3D11RenderSystem::_createRenderWindow");
 		}
 
 #if OGRE_PLATFORM == OGRE_PLATFORM_WIN32
@@ -881,11 +761,15 @@ namespace Ogre
 			mHardwareBufferManager = new D3D11HardwareBufferManager(mDevice);
 
 			// Create the GPU program manager
-			mGpuProgramManager = new D3D11GpuProgramManager();
+	        mGpuProgramManager = new GpuProgramManager();
+	        ResourceGroupManager::getSingleton()._registerResourceManager(mGpuProgramManager->getResourceType(),
+	                                                                      mGpuProgramManager);
 			// create & register HLSL factory
 			if (mHLSLProgramFactory == NULL)
 				mHLSLProgramFactory = new D3D11HLSLProgramFactory(mDevice);
 			mRealCapabilities = createRenderSystemCapabilities();
+
+            mNativeShadingLanguageVersion = 4;
 
 			// if we are using custom capabilities, then 
 			// mCurrentCapabilities has already been loaded
@@ -939,12 +823,10 @@ namespace Ogre
         rsc->setNumTextureUnits(OGRE_MAX_TEXTURE_LAYERS);
         rsc->setNumVertexAttributes(D3D11_STANDARD_VERTEX_ELEMENT_COUNT);
         rsc->setCapability(RSC_ANISOTROPY);
-        rsc->setCapability(RSC_AUTOMIPMAP_COMPRESSED);
         rsc->setCapability(RSC_DOT3);
         // Cube map
         if (mFeatureLevel >= D3D_FEATURE_LEVEL_10_0)
         {
-            rsc->setCapability(RSC_CUBEMAPPING);
             rsc->setCapability(RSC_READ_BACK_AS_TEXTURE);
         }
 
@@ -1015,16 +897,17 @@ namespace Ogre
             break;
         }
 
+        rsc->setCapability(RSC_DEPTH_CLAMP);
         rsc->setCapability(RSC_INFINITE_FAR_PLANE);
 
         rsc->setCapability(RSC_TEXTURE_3D);
+        rsc->setCapability(RSC_TEXTURE_2D_ARRAY);
         if (mFeatureLevel >= D3D_FEATURE_LEVEL_10_0)
         {
             rsc->setCapability(RSC_NON_POWER_OF_2_TEXTURES);
             rsc->setCapability(RSC_HWRENDER_TO_TEXTURE_3D);
             rsc->setCapability(RSC_TEXTURE_1D);
             rsc->setCapability(RSC_TEXTURE_COMPRESSION_BC6H_BC7);
-            rsc->setCapability(RSC_COMPLETE_TEXTURE_BINDING);
         }
 
         rsc->setCapability(RSC_HWRENDER_TO_TEXTURE);
@@ -1041,7 +924,6 @@ namespace Ogre
         rsc->setNumMultiRenderTargets(std::min(numMultiRenderTargets, (int)OGRE_MAX_MULTIPLE_RENDER_TARGETS));
         rsc->setCapability(RSC_MRT_DIFFERENT_BIT_DEPTHS);
 
-        rsc->setCapability(RSC_POINT_SPRITES);
         rsc->setCapability(RSC_POINT_EXTENDED_PARAMETERS);
         rsc->setMaxPointSize(256); // TODO: guess!
     
@@ -1075,12 +957,6 @@ namespace Ogre
         
         // add hlsl
         HighLevelGpuProgramManager::getSingleton().addFactory(mHLSLProgramFactory);
-
-        Log* defaultLog = LogManager::getSingleton().getDefaultLog();
-        if (defaultLog)
-        {
-            caps->log(defaultLog);
-        }
     }
     //---------------------------------------------------------------------
     void D3D11RenderSystem::convertVertexShaderCaps(RenderSystemCapabilities* rsc) const
@@ -1097,7 +973,6 @@ namespace Ogre
             rsc->addShaderProfile("vs_4_0_level_9_3");
 #if SUPPORT_SM2_0_HLSL_SHADERS == 1
             rsc->addShaderProfile("vs_2_a");
-            rsc->addShaderProfile("vs_2_x");
 #endif
         }
         if (mFeatureLevel >= D3D_FEATURE_LEVEL_10_0)
@@ -1143,7 +1018,6 @@ namespace Ogre
 #if SUPPORT_SM2_0_HLSL_SHADERS == 1
             rsc->addShaderProfile("ps_2_a");
             rsc->addShaderProfile("ps_2_b");
-            rsc->addShaderProfile("ps_2_x");
 #endif
         }
         if (mFeatureLevel >= D3D_FEATURE_LEVEL_10_0)
@@ -1151,7 +1025,6 @@ namespace Ogre
             rsc->addShaderProfile("ps_4_0");
 #if SUPPORT_SM2_0_HLSL_SHADERS == 1
             rsc->addShaderProfile("ps_3_0");
-            rsc->addShaderProfile("ps_3_x");
 #endif
         }
         if (mFeatureLevel >= D3D_FEATURE_LEVEL_10_1)
@@ -1286,11 +1159,22 @@ namespace Ogre
     //-----------------------------------------------------------------------
     DepthBuffer* D3D11RenderSystem::_createDepthBufferFor( RenderTarget *renderTarget )
     {
-        //Get surface data (mainly to get MSAA data)
-        D3D11HardwarePixelBuffer *pBuffer;
-        renderTarget->getCustomAttribute( "BUFFER", &pBuffer );
+        // Get surface data (mainly to get MSAA data)
+        D3D11RenderTarget* d3d11RenderTarget = dynamic_cast<D3D11RenderTarget*>(renderTarget);
+        ID3D11Texture2D* d3d11Texture = NULL;
+        if (d3d11RenderTarget)
+        {
+            d3d11Texture = d3d11RenderTarget->getSurface();
+        }
+
+        if (!d3d11Texture)
+        {
+            OGRE_EXCEPT(Exception::ERR_RENDERINGAPI_ERROR, "Invalid render target",
+                        "D3D11RenderSystem::_createDepthBufferFor");
+        }
+
         D3D11_TEXTURE2D_DESC BBDesc;
-        static_cast<ID3D11Texture2D*>(pBuffer->getParentTexture()->getTextureResource())->GetDesc( &BBDesc );
+        d3d11Texture->GetDesc(&BBDesc);
 
         // Create depth stencil texture
         ComPtr<ID3D11Texture2D> pDepthStencil;
@@ -1302,9 +1186,9 @@ namespace Ogre
         descDepth.ArraySize             = BBDesc.ArraySize;
 
         if ( mFeatureLevel < D3D_FEATURE_LEVEL_10_0)
-            descDepth.Format            = DXGI_FORMAT_D24_UNORM_S8_UINT;
+            descDepth.Format            = isReverseDepthBufferEnabled() ? DXGI_FORMAT_D32_FLOAT : DXGI_FORMAT_D24_UNORM_S8_UINT;
         else
-            descDepth.Format            = DXGI_FORMAT_R24G8_TYPELESS;
+            descDepth.Format            = isReverseDepthBufferEnabled() ? DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_R24G8_TYPELESS;
 
         descDepth.SampleDesc.Count      = BBDesc.SampleDesc.Count;
         descDepth.SampleDesc.Quality    = BBDesc.SampleDesc.Quality;
@@ -1324,15 +1208,8 @@ namespace Ogre
             descDepth.MiscFlags     |= D3D11_RESOURCE_MISC_TEXTURECUBE;
         }
 
-
-        HRESULT hr = mDevice->CreateTexture2D( &descDepth, NULL, pDepthStencil.ReleaseAndGetAddressOf() );
-        if( FAILED(hr) || mDevice.isError())
-        {
-            String errorDescription = mDevice.getErrorDescription(hr);
-			OGRE_EXCEPT_EX(Exception::ERR_RENDERINGAPI_ERROR, hr,
-                "Unable to create depth texture\nError Description:" + errorDescription,
-                "D3D11RenderSystem::_createDepthBufferFor");
-        }
+        OGRE_CHECK_DX_ERROR(
+            mDevice->CreateTexture2D(&descDepth, NULL, pDepthStencil.ReleaseAndGetAddressOf()));
 
         //
         // Create the View of the texture
@@ -1341,18 +1218,12 @@ namespace Ogre
         if(!mReadBackAsTexture && mFeatureLevel >= D3D_FEATURE_LEVEL_10_0 && BBDesc.SampleDesc.Count == 1)
         {
             D3D11_SHADER_RESOURCE_VIEW_DESC viewDesc;
-            viewDesc.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+            viewDesc.Format = isReverseDepthBufferEnabled() ? DXGI_FORMAT_R32_FLOAT : DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
             viewDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
             viewDesc.Texture2D.MostDetailedMip = 0;
             viewDesc.Texture2D.MipLevels = 1;
-            HRESULT hr = mDevice->CreateShaderResourceView( pDepthStencil.Get(), &viewDesc, mDSTResView.ReleaseAndGetAddressOf());
-            if( FAILED(hr) || mDevice.isError())
-            {
-                String errorDescription = mDevice.getErrorDescription(hr);
-                OGRE_EXCEPT_EX(Exception::ERR_RENDERINGAPI_ERROR, hr,
-                    "Unable to create the view of the depth texture \nError Description:" + errorDescription,
-                    "D3D11RenderSystem::_createDepthBufferFor");
-            }
+            OGRE_CHECK_DX_ERROR(mDevice->CreateShaderResourceView(pDepthStencil.Get(), &viewDesc,
+                                                                  mDSTResView.ReleaseAndGetAddressOf()));
         }
 
         // Create the depth stencil view
@@ -1363,16 +1234,15 @@ namespace Ogre
         descDSV.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
         descDSV.ViewDimension = (BBDesc.SampleDesc.Count > 1) ? D3D11_DSV_DIMENSION_TEXTURE2DMS : D3D11_DSV_DIMENSION_TEXTURE2D;
         descDSV.Flags = 0 /* D3D11_DSV_READ_ONLY_DEPTH | D3D11_DSV_READ_ONLY_STENCIL */;    // TODO: Allows bind depth buffer as depth view AND texture simultaneously.
+
+        if(isReverseDepthBufferEnabled())
+        {
+            descDSV.Format            = DXGI_FORMAT_D32_FLOAT;
+        }
                                                                                             // TODO: Decide how to expose this feature
         descDSV.Texture2D.MipSlice = 0;
-        hr = mDevice->CreateDepthStencilView( pDepthStencil.Get(), &descDSV, &depthStencilView );
-        if( FAILED(hr) )
-        {
-			String errorDescription = mDevice.getErrorDescription(hr);
-			OGRE_EXCEPT_EX(Exception::ERR_RENDERINGAPI_ERROR, hr,
-                "Unable to create depth stencil view\nError Description:" + errorDescription,
-                "D3D11RenderSystem::_createDepthBufferFor");
-        }
+        OGRE_CHECK_DX_ERROR(
+            mDevice->CreateDepthStencilView(pDepthStencil.Get(), &descDSV, &depthStencilView));
 
         //Create the abstract container
         D3D11DepthBuffer *newDepthBuffer = new D3D11DepthBuffer( DepthBuffer::POOL_DEFAULT, this, depthStencilView,
@@ -1502,6 +1372,9 @@ namespace Ogre
         ID3D11DeviceN * device = createD3D11Device(d3dDriver, mDriverType, mMinRequestedFeatureLevel, mMaxRequestedFeatureLevel, &mFeatureLevel);
         mDevice.TransferOwnership(device);
 
+        LogManager::getSingleton().stream() << "D3D11: Device Feature Level " << (mFeatureLevel >> 12)
+                                            << "." << ((mFeatureLevel >> 8) & 0xF);
+
         LARGE_INTEGER driverVersion = mDevice.GetDriverVersion();
         mDriverVersion.major = HIWORD(driverVersion.HighPart);
         mDriverVersion.minor = LOWORD(driverVersion.HighPart);
@@ -1606,21 +1479,27 @@ namespace Ogre
         }
     }
     //---------------------------------------------------------------------
-    VertexElementType D3D11RenderSystem::getColourVertexElementType(void) const
-    {
-        return VET_COLOUR_ABGR;
-    }
-    //---------------------------------------------------------------------
     void D3D11RenderSystem::_convertProjectionMatrix(const Matrix4& matrix,
         Matrix4& dest, bool forGpuProgram)
     {
         dest = matrix;
 
-        // Convert depth range from [-1,+1] to [0,1]
-        dest[2][0] = (dest[2][0] + dest[3][0]) / 2;
-        dest[2][1] = (dest[2][1] + dest[3][1]) / 2;
-        dest[2][2] = (dest[2][2] + dest[3][2]) / 2;
-        dest[2][3] = (dest[2][3] + dest[3][3]) / 2;
+        if (mIsReverseDepthBufferEnabled)
+        {
+            // Convert depth range from [-1,+1] to [1,0]
+            dest[2][0] = (dest[2][0] - dest[3][0]) * -0.5f;
+            dest[2][1] = (dest[2][1] - dest[3][1]) * -0.5f;
+            dest[2][2] = (dest[2][2] - dest[3][2]) * -0.5f;
+            dest[2][3] = (dest[2][3] - dest[3][3]) * -0.5f;
+        }
+        else
+        {
+            // Convert depth range from [-1,+1] to [0,1]
+            dest[2][0] = (dest[2][0] + dest[3][0]) / 2;
+            dest[2][1] = (dest[2][1] + dest[3][1]) / 2;
+            dest[2][2] = (dest[2][2] + dest[3][2]) / 2;
+            dest[2][3] = (dest[2][3] + dest[3][3]) / 2;
+        }
 
         if (!forGpuProgram)
         {
@@ -1632,77 +1511,6 @@ namespace Ogre
         }
     }
     //---------------------------------------------------------------------
-    void D3D11RenderSystem::_makeProjectionMatrix(const Radian& fovy, Real aspect, Real nearPlane, 
-        Real farPlane, Matrix4& dest, bool forGpuProgram)
-    {
-        Radian theta ( fovy * 0.5 );
-        Real h = 1 / Math::Tan(theta);
-        Real w = h / aspect;
-        Real q, qn;
-        if (farPlane == 0)
-        {
-            q = 1 - Frustum::INFINITE_FAR_PLANE_ADJUST;
-            qn = nearPlane * (Frustum::INFINITE_FAR_PLANE_ADJUST - 1);
-        }
-        else
-        {
-            q = farPlane / ( farPlane - nearPlane );
-            qn = -q * nearPlane;
-        }
-
-        dest = Matrix4::ZERO;
-        dest[0][0] = w;
-        dest[1][1] = h;
-
-        if (forGpuProgram)
-        {
-            dest[2][2] = -q;
-            dest[3][2] = -1.0f;
-        }
-        else
-        {
-            dest[2][2] = q;
-            dest[3][2] = 1.0f;
-        }
-
-        dest[2][3] = qn;
-    }
-    //---------------------------------------------------------------------
-    void D3D11RenderSystem::_makeOrthoMatrix(const Radian& fovy, Real aspect, Real nearPlane, Real farPlane, 
-        Matrix4& dest, bool forGpuProgram )
-    {
-        Radian thetaY (fovy / 2.0f);
-        Real tanThetaY = Math::Tan(thetaY);
-
-        //Real thetaX = thetaY * aspect;
-        Real tanThetaX = tanThetaY * aspect; //Math::Tan(thetaX);
-        Real half_w = tanThetaX * nearPlane;
-        Real half_h = tanThetaY * nearPlane;
-        Real iw = 1.0f / half_w;
-        Real ih = 1.0f / half_h;
-        Real q;
-        if (farPlane == 0)
-        {
-            q = 0;
-        }
-        else
-        {
-            q = 1.0f / (farPlane - nearPlane);
-        }
-
-        dest = Matrix4::ZERO;
-        dest[0][0] = iw;
-        dest[1][1] = ih;
-        dest[2][2] = q;
-        dest[2][3] = -nearPlane / (farPlane - nearPlane);
-        dest[3][3] = 1;
-
-        if (forGpuProgram)
-        {
-            dest[2][2] = -dest[2][2];
-        }
-    }
-    //---------------------------------------------------------------------
     void D3D11RenderSystem::_setTexture( size_t stage, bool enabled, const TexturePtr& tex )
     {
         static D3D11TexturePtr dt;
@@ -1711,7 +1519,7 @@ namespace Ogre
         {
             // note used
             dt->touch();
-            ID3D11ShaderResourceView * pTex = dt->getTexture();
+            ID3D11ShaderResourceView * pTex = dt->getSrvView();
             mTexStageDesc[stage].pTex = pTex;
             mTexStageDesc[stage].used = true;
             mTexStageDesc[stage].type = dt->getTextureType();
@@ -1730,78 +1538,11 @@ namespace Ogre
     {
         mSamplerStatesChanged = true;
 
-        const Sampler::UVWAddressingMode& uvw = sampler.getAddressingMode();
-        mTexStageDesc[unit].samplerDesc.AddressU = D3D11Mappings::get(uvw.u);
-        mTexStageDesc[unit].samplerDesc.AddressV = D3D11Mappings::get(uvw.v);
-        mTexStageDesc[unit].samplerDesc.AddressW = D3D11Mappings::get(uvw.w);
-        mTexStageDesc[unit].samplerDesc.MipLODBias = sampler.getMipmapBias();
-
-        if (uvw.u == TAM_BORDER || uvw.v == TAM_BORDER || uvw.w == TAM_BORDER)
-            D3D11Mappings::get(sampler.getBorderColour(), mTexStageDesc[unit].samplerDesc.BorderColor);
-
-        mTexStageDesc[unit].samplerDesc.MaxAnisotropy = sampler.getAnisotropy();
-        mTexStageDesc[unit].samplerDesc.ComparisonFunc = D3D11Mappings::get(sampler.getCompareFunction());
-
-        FilterMinification[unit] = sampler.getFiltering(FT_MIN);
-        FilterMagnification[unit] = sampler.getFiltering(FT_MAG);
-        FilterMips[unit] = sampler.getFiltering(FT_MIP);
-
-        mTexStageDesc[unit].samplerDesc.Filter =
-            D3D11Mappings::get(FilterMinification[unit], FilterMagnification[unit], FilterMips[unit],
-                               sampler.getCompareEnabled());
-    }
-    //---------------------------------------------------------------------
-    void D3D11RenderSystem::_setTextureMipmapBias(size_t unit, float bias)
-    {
-        mTexStageDesc[unit].samplerDesc.MipLODBias = bias;
-        mSamplerStatesChanged = true;
-    }
-    //---------------------------------------------------------------------
-    void D3D11RenderSystem::_setTextureAddressingMode( size_t stage, 
-        const Sampler::UVWAddressingMode& uvw )
-    {
-        // record the stage state
-        mTexStageDesc[stage].samplerDesc.AddressU = D3D11Mappings::get(uvw.u);
-        mTexStageDesc[stage].samplerDesc.AddressV = D3D11Mappings::get(uvw.v);
-        mTexStageDesc[stage].samplerDesc.AddressW = D3D11Mappings::get(uvw.w);
-        mSamplerStatesChanged = true;
-    }
-    //-----------------------------------------------------------------------------
-    void D3D11RenderSystem::_setTextureBorderColour(size_t stage,
-        const ColourValue& colour)
-    {
-        D3D11Mappings::get(colour, mTexStageDesc[stage].samplerDesc.BorderColor);
-        mSamplerStatesChanged = true;
-    }
-    //---------------------------------------------------------------------
-    void D3D11RenderSystem::_setSeparateSceneBlending( SceneBlendFactor sourceFactor, SceneBlendFactor destFactor, SceneBlendFactor sourceFactorAlpha, SceneBlendFactor destFactorAlpha, SceneBlendOperation op /*= SBO_ADD*/, SceneBlendOperation alphaOp /*= SBO_ADD*/ )
-    {
-        if( sourceFactor == SBF_ONE && destFactor == SBF_ZERO && 
-            sourceFactorAlpha == SBF_ONE && destFactorAlpha == SBF_ZERO)
-        {
-            mBlendDesc.RenderTarget[0].BlendEnable = FALSE;
-        }
-        else
-        {
-            mBlendDesc.RenderTarget[0].BlendEnable = TRUE;
-            mBlendDesc.RenderTarget[0].SrcBlend = D3D11Mappings::get(sourceFactor, false);
-            mBlendDesc.RenderTarget[0].DestBlend = D3D11Mappings::get(destFactor, false);
-            mBlendDesc.RenderTarget[0].BlendOp = D3D11Mappings::get(op) ;
-            mBlendDesc.RenderTarget[0].SrcBlendAlpha = D3D11Mappings::get(sourceFactorAlpha, true);
-            mBlendDesc.RenderTarget[0].DestBlendAlpha = D3D11Mappings::get(destFactorAlpha, true);
-            mBlendDesc.RenderTarget[0].BlendOpAlpha = D3D11Mappings::get(alphaOp) ;
-            mBlendDesc.AlphaToCoverageEnable = false;
-
-            mBlendDesc.RenderTarget[0].RenderTargetWriteMask = 0x0F;
-        }
-        mBlendDescChanged = true;
+        mTexStageDesc[unit].pSampler = static_cast<D3D11Sampler&>(sampler).getState();
     }
     //---------------------------------------------------------------------
     void D3D11RenderSystem::_setAlphaRejectSettings( CompareFunction func, unsigned char value, bool alphaToCoverage )
     {
-        mSceneAlphaRejectFunc   = func;
-        mSceneAlphaRejectValue  = value;
-        mSceneAlphaToCoverage   = alphaToCoverage;
         mBlendDesc.AlphaToCoverageEnable = alphaToCoverage;
         mBlendDescChanged = true;
     }
@@ -1814,6 +1555,11 @@ namespace Ogre
 					!mInvertVertexWinding && mActiveRenderTarget->requiresTextureFlipping());
 
 		mRasterizerDesc.CullMode = D3D11Mappings::get(mode, flip);
+        mRasterizerDescChanged = true;
+    }
+    void D3D11RenderSystem::_setDepthClamp(bool enable)
+    {
+        mRasterizerDesc.DepthClipEnable = !enable;
         mRasterizerDescChanged = true;
     }
     //---------------------------------------------------------------------
@@ -1845,32 +1591,62 @@ namespace Ogre
     //---------------------------------------------------------------------
     void D3D11RenderSystem::_setDepthBufferFunction( CompareFunction func )
     {
+        if(isReverseDepthBufferEnabled())
+            func = reverseCompareFunction(func);
+
         mDepthStencilDesc.DepthFunc = D3D11Mappings::get(func);
         mDepthStencilDescChanged = true;
     }
     //---------------------------------------------------------------------
     void D3D11RenderSystem::_setDepthBias(float constantBias, float slopeScaleBias)
     {
+        if(isReverseDepthBufferEnabled())
+        {
+            slopeScaleBias *= -1;
+            constantBias *= -1;
+        }
+
 		const float nearFarFactor = 10.0; 
 		mRasterizerDesc.DepthBias = static_cast<int>(-constantBias * nearFarFactor);
 		mRasterizerDesc.SlopeScaledDepthBias = -slopeScaleBias;
         mRasterizerDescChanged = true;
     }
     //---------------------------------------------------------------------
-    void D3D11RenderSystem::_setColourBufferWriteEnabled(bool red, bool green, 
-        bool blue, bool alpha)
+    void D3D11RenderSystem::setColourBlendState(const ColourBlendState& state)
     {
+        // record this
+        mCurrentBlend = state;
+
+        if (state.blendingEnabled())
+        {
+            mBlendDesc.RenderTarget[0].BlendEnable = TRUE;
+            mBlendDesc.RenderTarget[0].SrcBlend = D3D11Mappings::get(state.sourceFactor, false);
+            mBlendDesc.RenderTarget[0].DestBlend = D3D11Mappings::get(state.destFactor, false);
+            mBlendDesc.RenderTarget[0].BlendOp = D3D11Mappings::get(state.operation) ;
+            mBlendDesc.RenderTarget[0].SrcBlendAlpha = D3D11Mappings::get(state.sourceFactorAlpha, true);
+            mBlendDesc.RenderTarget[0].DestBlendAlpha = D3D11Mappings::get(state.destFactorAlpha, true);
+            mBlendDesc.RenderTarget[0].BlendOpAlpha = D3D11Mappings::get(state.alphaOperation) ;
+            mBlendDesc.AlphaToCoverageEnable = false;
+
+            mBlendDesc.RenderTarget[0].RenderTargetWriteMask = 0x0F;
+        }
+        else
+        {
+            mBlendDesc.RenderTarget[0].BlendEnable = FALSE;
+        }
+
         UINT8 val = 0;
-        if (red) 
+        if (state.writeR)
             val |= D3D11_COLOR_WRITE_ENABLE_RED;
-        if (green)
+        if (state.writeG)
             val |= D3D11_COLOR_WRITE_ENABLE_GREEN;
-        if (blue)
+        if (state.writeB)
             val |= D3D11_COLOR_WRITE_ENABLE_BLUE;
-        if (alpha)
+        if (state.writeA)
             val |= D3D11_COLOR_WRITE_ENABLE_ALPHA;
 
-        mBlendDesc.RenderTarget[0].RenderTargetWriteMask = val; 
+        mBlendDesc.RenderTarget[0].RenderTargetWriteMask = val;
+
         mBlendDescChanged = true;
     }
     //---------------------------------------------------------------------
@@ -1920,48 +1696,6 @@ namespace Ogre
         mDepthStencilDescChanged = true;
     }
     //---------------------------------------------------------------------
-    void D3D11RenderSystem::_setTextureUnitFiltering(size_t unit, FilterType ftype, 
-        FilterOptions filter)
-    {
-        switch(ftype) {
-        case FT_MIN:
-            FilterMinification[unit] = filter;
-            break;
-        case FT_MAG:
-            FilterMagnification[unit] = filter;
-            break;
-        case FT_MIP:
-            FilterMips[unit] = filter;
-            break;
-        }
-
-        mTexStageDesc[unit].samplerDesc.Filter = D3D11Mappings::get(FilterMinification[unit], FilterMagnification[unit], FilterMips[unit],CompareEnabled);
-        mSamplerStatesChanged = true;
-    }
-    //---------------------------------------------------------------------
-    void D3D11RenderSystem::_setTextureUnitCompareEnabled(size_t unit, bool compare)
-    {
-        CompareEnabled = compare;
-        mSamplerStatesChanged = true;
-    }
-    //---------------------------------------------------------------------
-    void D3D11RenderSystem::_setTextureUnitCompareFunction(size_t unit, CompareFunction function)
-    {
-        mTexStageDesc[unit].samplerDesc.ComparisonFunc = D3D11Mappings::get(function);
-        mSamplerStatesChanged = true;
-    }
-    //---------------------------------------------------------------------
-    DWORD D3D11RenderSystem::_getCurrentAnisotropy(size_t unit)
-    {
-        return mTexStageDesc[unit].samplerDesc.MaxAnisotropy;;
-    }
-    //---------------------------------------------------------------------
-    void D3D11RenderSystem::_setTextureLayerAnisotropy(size_t unit, unsigned int maxAnisotropy)
-    {
-        mTexStageDesc[unit].samplerDesc.MaxAnisotropy = maxAnisotropy;
-        mSamplerStatesChanged = true;
-    }
-    //---------------------------------------------------------------------
     void D3D11RenderSystem::_setRenderTarget(RenderTarget *target)
     {
         mActiveRenderTarget = target;
@@ -1985,17 +1719,24 @@ namespace Ogre
     //---------------------------------------------------------------------
     void D3D11RenderSystem::_setRenderTargetViews()
     {
-        RenderTarget *target = mActiveRenderTarget;
+        RenderTarget* target = mActiveRenderTarget;
+        D3D11RenderTarget* d3d11RenderTarget = dynamic_cast<D3D11RenderTarget*>(target);
 
-        if (target)
+        if (target && d3d11RenderTarget)
         {
-            ID3D11RenderTargetView * pRTView[OGRE_MAX_MULTIPLE_RENDER_TARGETS];
+            ID3D11RenderTargetView* pRTView[OGRE_MAX_MULTIPLE_RENDER_TARGETS];
             memset(pRTView, 0, sizeof(pRTView));
 
-            target->getCustomAttribute( "ID3D11RenderTargetView", &pRTView );
+            uint numberOfViews = d3d11RenderTarget->getNumberOfViews();
 
-            uint numberOfViews;
-            target->getCustomAttribute( "numberOfViews", &numberOfViews );
+            for (uint i = 0; i < OGRE_MAX_MULTIPLE_RENDER_TARGETS; i++)
+            {
+                pRTView[i] = d3d11RenderTarget->getRenderTargetView(i);
+                if (!pRTView[i])
+                {
+                    break;
+                }
+            }
 
             //Retrieve depth buffer
             D3D11DepthBuffer *depthBuffer = static_cast<D3D11DepthBuffer*>(target->getDepthBuffer());
@@ -2088,13 +1829,6 @@ namespace Ogre
         }
     }
     //---------------------------------------------------------------------
-    void D3D11RenderSystem::_beginFrame()
-    {
-    
-        if( !mActiveViewport )
-            OGRE_EXCEPT( Exception::ERR_INTERNAL_ERROR, "Cannot begin frame - no viewport selected.", "D3D11RenderSystem::_beginFrame" );
-    }
-    //---------------------------------------------------------------------
     void D3D11RenderSystem::_endFrame()
     {
     }
@@ -2122,13 +1856,12 @@ namespace Ogre
         iend = binds.end();
         for (i = binds.begin(); i != iend; ++i)
         {
-            const D3D11HardwareVertexBuffer* d3d11buf = 
-                static_cast<const D3D11HardwareVertexBuffer*>(i->second.get());
+            const D3D11HardwareBuffer* d3d11buf = i->second->_getImpl<D3D11HardwareBuffer>();
 
-            UINT stride = static_cast<UINT>(d3d11buf->getVertexSize());
+            UINT stride = static_cast<UINT>(i->second->getVertexSize());
             UINT offset = 0; // no stream offset, this is handled in _render instead
             UINT slot = static_cast<UINT>(i->first);
-            ID3D11Buffer * pVertexBuffers = d3d11buf->getD3DVertexBuffer();
+            ID3D11Buffer * pVertexBuffers = d3d11buf->getD3DBuffer();
             mDevice.GetImmediateContext()->IASetVertexBuffers(
                 slot, // The first input slot for binding.
                 1, // The number of vertex buffers in the array.
@@ -2151,14 +1884,14 @@ namespace Ogre
 
     //---------------------------------------------------------------------
     // TODO: Move this class to the right place.
-    class D3D11RenderOperationState : public Renderable::RenderSystemData
+    class D3D11RenderOperationState
     {
     public:
         ComPtr<ID3D11BlendState> mBlendState;
         ComPtr<ID3D11RasterizerState> mRasterizer;
         ComPtr<ID3D11DepthStencilState> mDepthStencilState;
 
-        ComPtr<ID3D11SamplerState> mSamplerStates[OGRE_MAX_TEXTURE_LAYERS];
+        ID3D11SamplerState* mSamplerStates[OGRE_MAX_TEXTURE_LAYERS];
         size_t mSamplerStatesCount;
 
         ID3D11ShaderResourceView * mTextures[OGRE_MAX_TEXTURE_LAYERS]; // note - not owning
@@ -2216,14 +1949,8 @@ namespace Ogre
             mBlendDescChanged = false;
             mBoundBlendState = 0;
 
-            HRESULT hr = mDevice->CreateBlendState(&mBlendDesc, opState->mBlendState.ReleaseAndGetAddressOf()) ;
-            if (FAILED(hr))
-            {
-				String errorDescription = mDevice.getErrorDescription(hr);
-				OGRE_EXCEPT_EX(Exception::ERR_RENDERINGAPI_ERROR, hr,
-                    "Failed to create blend state\nError Description:" + errorDescription, 
-                    "D3D11RenderSystem::_render" );
-            }
+            OGRE_CHECK_DX_ERROR(
+                mDevice->CreateBlendState(&mBlendDesc, opState->mBlendState.ReleaseAndGetAddressOf()));
         }
         else
         {
@@ -2235,14 +1962,7 @@ namespace Ogre
 			mRasterizerDescChanged=false;
 			mBoundRasterizer = 0;
 
-            HRESULT hr = mDevice->CreateRasterizerState(&mRasterizerDesc, opState->mRasterizer.ReleaseAndGetAddressOf()) ;
-            if (FAILED(hr))
-            {
-				String errorDescription = mDevice.getErrorDescription(hr);
-				OGRE_EXCEPT_EX(Exception::ERR_RENDERINGAPI_ERROR, hr,
-                    "Failed to create rasterizer state\nError Description:" + errorDescription, 
-                    "D3D11RenderSystem::_render" );
-            }
+            OGRE_CHECK_DX_ERROR(mDevice->CreateRasterizerState(&mRasterizerDesc, opState->mRasterizer.ReleaseAndGetAddressOf()));
         }
         else
         {
@@ -2254,14 +1974,7 @@ namespace Ogre
 			mBoundDepthStencilState = 0;
 			mDepthStencilDescChanged=false;
 
-            HRESULT hr = mDevice->CreateDepthStencilState(&mDepthStencilDesc, opState->mDepthStencilState.ReleaseAndGetAddressOf()) ;
-            if (FAILED(hr))
-            {
-				String errorDescription = mDevice.getErrorDescription(hr);
-				OGRE_EXCEPT_EX(Exception::ERR_RENDERINGAPI_ERROR, hr,
-                    "Failed to create depth stencil state\nError Description:" + errorDescription, 
-                    "D3D11RenderSystem::_render" );
-            }
+            OGRE_CHECK_DX_ERROR(mDevice->CreateDepthStencilState(&mDepthStencilDesc, opState->mDepthStencilState.ReleaseAndGetAddressOf()));
         }
         else
 		{
@@ -2278,31 +1991,10 @@ namespace Ogre
                             
             for (size_t n = 0; n < numberOfSamplers; n++)
             {
-                ComPtr<ID3D11SamplerState> samplerState;
-                ID3D11ShaderResourceView *texture = NULL;
+                ID3D11SamplerState *sampler = NULL;
                 sD3DTextureStageDesc & stage = mTexStageDesc[n];
-                if(stage.used)
-                {
-                    texture = stage.pTex;
-
-                    stage.samplerDesc.Filter = D3D11Mappings::get(FilterMinification[n], FilterMagnification[n], FilterMips[n], false);
-                    stage.samplerDesc.ComparisonFunc = D3D11Mappings::get(mSceneAlphaRejectFunc);
-                    stage.samplerDesc.MipLODBias = static_cast<float>(Math::Clamp(stage.samplerDesc.MipLODBias - 0.5, -16.00, 15.99));
-                    stage.samplerDesc.MinLOD = -D3D11_FLOAT32_MAX;
-                    stage.samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
-
-                    HRESULT hr = mDevice->CreateSamplerState(&stage.samplerDesc, samplerState.ReleaseAndGetAddressOf());
-                    if (FAILED(hr))
-                    {
-                        String errorDescription = mDevice.getErrorDescription(hr);
-                        OGRE_EXCEPT_EX(Exception::ERR_RENDERINGAPI_ERROR, hr,
-                            "Failed to create sampler state\nError Description:" + errorDescription,
-                            "D3D11RenderSystem::_render" );
-                    }
-                
-                }
-                opState->mSamplerStates[n].Swap(samplerState);
-                opState->mTextures[n]       = texture;
+                opState->mSamplerStates[n]  = stage.used ? stage.pSampler : NULL;
+                opState->mTextures[n]       = stage.used ? stage.pTex : NULL;
             }
             for (size_t n = opState->mTexturesCount; n < OGRE_MAX_TEXTURE_LAYERS; n++)
 			{
@@ -2358,7 +2050,7 @@ namespace Ogre
             /// Pixel Shader binding
             {
                 {
-                    mDevice.GetImmediateContext()->PSSetSamplers(static_cast<UINT>(0), static_cast<UINT>(opState->mSamplerStatesCount), opState->mSamplerStates[0].GetAddressOf());
+                    mDevice.GetImmediateContext()->PSSetSamplers(static_cast<UINT>(0), static_cast<UINT>(opState->mSamplerStatesCount), opState->mSamplerStates);
                     if (mDevice.isError())
                     {
                         String errorDescription = mDevice.getErrorDescription();
@@ -2381,7 +2073,7 @@ namespace Ogre
             /// Vertex Shader binding
             if (mFeatureLevel >= D3D_FEATURE_LEVEL_10_0)
             {
-                mDevice.GetImmediateContext()->VSSetSamplers(static_cast<UINT>(0), static_cast<UINT>(opState->mSamplerStatesCount), opState->mSamplerStates[0].GetAddressOf());
+                mDevice.GetImmediateContext()->VSSetSamplers(static_cast<UINT>(0), static_cast<UINT>(opState->mSamplerStatesCount), opState->mSamplerStates);
                 if (mDevice.isError())
                 {
                     String errorDescription = mDevice.getErrorDescription();
@@ -2402,7 +2094,7 @@ namespace Ogre
             /// Geometry Shader binding
             if (mBoundGeometryProgram && mFeatureLevel >= D3D_FEATURE_LEVEL_10_0)
             {
-                mDevice.GetImmediateContext()->GSSetSamplers(0, opState->mSamplerStatesCount, opState->mSamplerStates[0].GetAddressOf());
+                mDevice.GetImmediateContext()->GSSetSamplers(0, opState->mSamplerStatesCount, opState->mSamplerStates);
                 if (mDevice.isError())
                 {
                     String errorDescription = mDevice.getErrorDescription();
@@ -2424,7 +2116,7 @@ namespace Ogre
             /// Compute Shader binding
             if (mBoundComputeProgram && mFeatureLevel >= D3D_FEATURE_LEVEL_10_0)
             {
-                mDevice.GetImmediateContext()->CSSetSamplers(static_cast<UINT>(0), static_cast<UINT>(opState->mSamplerStatesCount), opState->mSamplerStates[0].GetAddressOf());
+                mDevice.GetImmediateContext()->CSSetSamplers(static_cast<UINT>(0), static_cast<UINT>(opState->mSamplerStatesCount), opState->mSamplerStates);
                 if (mDevice.isError())
                 {
                     String errorDescription = mDevice.getErrorDescription();
@@ -2446,7 +2138,7 @@ namespace Ogre
             /// Hull Shader binding
             if (mBoundTessellationHullProgram && mFeatureLevel >= D3D_FEATURE_LEVEL_10_0)
             {
-                mDevice.GetImmediateContext()->HSSetSamplers(static_cast<UINT>(0), static_cast<UINT>(opState->mSamplerStatesCount), opState->mSamplerStates[0].GetAddressOf());
+                mDevice.GetImmediateContext()->HSSetSamplers(static_cast<UINT>(0), static_cast<UINT>(opState->mSamplerStatesCount), opState->mSamplerStates);
                 if (mDevice.isError())
                 {
                     String errorDescription = mDevice.getErrorDescription();
@@ -2468,7 +2160,7 @@ namespace Ogre
             /// Domain Shader binding
             if (mBoundTessellationDomainProgram && mFeatureLevel >= D3D_FEATURE_LEVEL_10_0)
             {
-                mDevice.GetImmediateContext()->DSSetSamplers(static_cast<UINT>(0), static_cast<UINT>(opState->mSamplerStatesCount), opState->mSamplerStates[0].GetAddressOf());
+                mDevice.GetImmediateContext()->DSSetSamplers(static_cast<UINT>(0), static_cast<UINT>(opState->mSamplerStatesCount), opState->mSamplerStates);
                 if (mDevice.isError())
                 {
                     String errorDescription = mDevice.getErrorDescription();
@@ -2618,13 +2310,7 @@ namespace Ogre
         D3D11_PRIMITIVE_TOPOLOGY primType = D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST;
         DWORD primCount = 0;
 
-        // Handle computing
-        if(mBoundComputeProgram)
-        {
-            _dispatchCompute(Vector3i(mBoundComputeProgram->getComputeGroupDimensions()));
-            return;
-        }
-        else if(mBoundTessellationHullProgram && mBoundTessellationDomainProgram)
+        if(mBoundTessellationHullProgram && mBoundTessellationDomainProgram)
         {
             // useful primitives for tessellation
             switch( op.operationType )
@@ -2718,9 +2404,8 @@ namespace Ogre
             //HRESULT hr;
             if( op.useIndexes  )
             {
-                D3D11HardwareIndexBuffer* d3dIdxBuf = 
-                    static_cast<D3D11HardwareIndexBuffer*>(op.indexData->indexBuffer.get());
-                mDevice.GetImmediateContext()->IASetIndexBuffer( d3dIdxBuf->getD3DIndexBuffer(), D3D11Mappings::getFormat(d3dIdxBuf->getType()), 0 );
+                auto d3dBuf = op.indexData->indexBuffer->_getImpl<D3D11HardwareBuffer>();
+                mDevice.GetImmediateContext()->IASetIndexBuffer( d3dBuf->getD3DBuffer(), D3D11Mappings::getFormat(op.indexData->indexBuffer->getType()), 0 );
                 if (mDevice.isError())
                 {
                     String errorDescription = mDevice.getErrorDescription();
@@ -2822,19 +2507,26 @@ namespace Ogre
     //---------------------------------------------------------------------
     void D3D11RenderSystem::_renderUsingReadBackAsTexture(unsigned int passNr, Ogre::String variableName, unsigned int StartSlot)
     {
-        RenderTarget *target = mActiveRenderTarget;
+        RenderTarget* target = mActiveRenderTarget;
+        D3D11RenderTarget* d3d11RenderTarget = dynamic_cast<D3D11RenderTarget*>(target);
         switch (passNr)
         {
         case 1:
-            if (target)
+            if (target && d3d11RenderTarget)
             {
-                ID3D11RenderTargetView * pRTView[OGRE_MAX_MULTIPLE_RENDER_TARGETS];
+                ID3D11RenderTargetView* pRTView[OGRE_MAX_MULTIPLE_RENDER_TARGETS];
                 memset(pRTView, 0, sizeof(pRTView));
 
-                target->getCustomAttribute( "ID3D11RenderTargetView", &pRTView );
+                uint numberOfViews = d3d11RenderTarget->getNumberOfViews();
 
-                uint numberOfViews;
-                target->getCustomAttribute( "numberOfViews", &numberOfViews );
+                for (uint i = 0; i < OGRE_MAX_MULTIPLE_RENDER_TARGETS; i++)
+                {
+                    pRTView[i] = d3d11RenderTarget->getRenderTargetView(i);
+                    if (!pRTView[i])
+                    {
+                        break;
+                    }
+                }
 
                 //Retrieve depth buffer
                 D3D11DepthBuffer *depthBuffer = static_cast<D3D11DepthBuffer*>(target->getDepthBuffer());
@@ -2856,32 +2548,33 @@ namespace Ogre
                 mDevice.GetImmediateContext()->ClearDepthStencilView(depthBuffer->getDepthStencilView(), D3D11_CLEAR_DEPTH, 1.0f, 0);
 
                 float ClearColor[4];
-                //D3D11Mappings::get(colour, ClearColor);
+                // D3D11Mappings::get(colour, ClearColor);
                 // Clear all views
-                mActiveRenderTarget->getCustomAttribute( "numberOfViews", &numberOfViews );
-                if( numberOfViews == 1 )
-                    mDevice.GetImmediateContext()->ClearRenderTargetView( pRTView[0], ClearColor );
-                else
+                for (uint i = 0; i < numberOfViews; ++i)
                 {
-                    for( uint i = 0; i < numberOfViews; ++i )
-                        mDevice.GetImmediateContext()->ClearRenderTargetView( pRTView[i], ClearColor );
+                    mDevice.GetImmediateContext()->ClearRenderTargetView(pRTView[i], ClearColor);
                 }
-
             }
             break;
         case 2:
-            if (target)
+            if (target && d3d11RenderTarget)
             {
                 //
                 // We need to remove the the DST from the Render Targets if we want to use it as a texture :
                 //
-                ID3D11RenderTargetView * pRTView[OGRE_MAX_MULTIPLE_RENDER_TARGETS];
+                ID3D11RenderTargetView* pRTView[OGRE_MAX_MULTIPLE_RENDER_TARGETS];
                 memset(pRTView, 0, sizeof(pRTView));
 
-                target->getCustomAttribute( "ID3D11RenderTargetView", &pRTView );
+                uint numberOfViews = d3d11RenderTarget->getNumberOfViews();
 
-                uint numberOfViews;
-                target->getCustomAttribute( "numberOfViews", &numberOfViews );
+                for (uint i = 0; i < OGRE_MAX_MULTIPLE_RENDER_TARGETS; i++)
+                {
+                    pRTView[i] = d3d11RenderTarget->getRenderTargetView(i);
+                    if (!pRTView[i])
+                    {
+                        break;
+                    }
+                }
 
                 //Retrieve depth buffer
                 D3D11DepthBuffer *depthBuffer = static_cast<D3D11DepthBuffer*>(target->getDepthBuffer());
@@ -2912,10 +2605,7 @@ namespace Ogre
             
             if (target)
             {
-                uint numberOfViews;
-                target->getCustomAttribute( "numberOfViews", &numberOfViews );
-
-                mDevice.GetImmediateContext()->PSSetShaderResources(static_cast<UINT>(StartSlot), static_cast<UINT>(numberOfViews), NULL);
+                mDevice.GetImmediateContext()->PSSetShaderResources(static_cast<UINT>(StartSlot), 1, NULL);
                     if (mDevice.isError())
                     {
                         String errorDescription = mDevice.getErrorDescription();
@@ -3097,7 +2787,7 @@ namespace Ogre
         RenderSystem::unbindGpuProgram(gptype);
     }
     //---------------------------------------------------------------------
-    void D3D11RenderSystem::bindGpuProgramParameters(GpuProgramType gptype, GpuProgramParametersSharedPtr params, uint16 mask)
+    void D3D11RenderSystem::bindGpuProgramParameters(GpuProgramType gptype, const GpuProgramParametersPtr& params, uint16 mask)
     {
         if (mask & (uint16)GPV_GLOBAL)
         {
@@ -3233,33 +2923,6 @@ namespace Ogre
         }
     }
     //---------------------------------------------------------------------
-    void D3D11RenderSystem::bindGpuProgramPassIterationParameters(GpuProgramType gptype)
-    {
-
-        switch(gptype)
-        {
-        case GPT_VERTEX_PROGRAM:
-            bindGpuProgramParameters(gptype, mActiveVertexGpuProgramParameters, (uint16)GPV_PASS_ITERATION_NUMBER);
-            break;
-
-        case GPT_FRAGMENT_PROGRAM:
-            bindGpuProgramParameters(gptype, mActiveFragmentGpuProgramParameters, (uint16)GPV_PASS_ITERATION_NUMBER);
-            break;
-        case GPT_GEOMETRY_PROGRAM:
-            bindGpuProgramParameters(gptype, mActiveGeometryGpuProgramParameters, (uint16)GPV_PASS_ITERATION_NUMBER);
-            break;
-        case GPT_HULL_PROGRAM:
-            bindGpuProgramParameters(gptype, mActiveTessellationHullGpuProgramParameters, (uint16)GPV_PASS_ITERATION_NUMBER);
-            break;
-        case GPT_DOMAIN_PROGRAM:
-            bindGpuProgramParameters(gptype, mActiveTessellationDomainGpuProgramParameters, (uint16)GPV_PASS_ITERATION_NUMBER);
-            break;
-        case GPT_COMPUTE_PROGRAM:
-            bindGpuProgramParameters(gptype, mActiveComputeGpuProgramParameters, (uint16)GPV_PASS_ITERATION_NUMBER);
-            break;
-        }
-    }
-    //---------------------------------------------------------------------
     void D3D11RenderSystem::setSubroutine(GpuProgramType gptype, unsigned int slotIndex, const String& subroutineName)
     {
         ID3D11ClassInstance* instance = 0;
@@ -3353,14 +3016,13 @@ namespace Ogre
         setSubroutine(gptype, slotIdx, subroutineName);
     }
     //---------------------------------------------------------------------
-    void D3D11RenderSystem::setScissorTest(bool enabled, size_t left, size_t top, size_t right,
-        size_t bottom)
+    void D3D11RenderSystem::setScissorTest(bool enabled, const Rect& rect)
     {
         mRasterizerDesc.ScissorEnable = enabled;
-        mScissorRect.left = static_cast<LONG>(left);
-        mScissorRect.top = static_cast<LONG>(top);
-        mScissorRect.right = static_cast<LONG>(right);
-        mScissorRect.bottom =static_cast<LONG>( bottom);
+        mScissorRect.left = rect.left;
+        mScissorRect.top = rect.top;
+        mScissorRect.right = rect.right;
+        mScissorRect.bottom = rect.bottom;
 
         mDevice.GetImmediateContext()->RSSetScissorRects(1, &mScissorRect);
         if (mDevice.isError())
@@ -3376,27 +3038,31 @@ namespace Ogre
     void D3D11RenderSystem::clearFrameBuffer(unsigned int buffers, 
         const ColourValue& colour, Real depth, unsigned short stencil)
     {
-        if (mActiveRenderTarget)
+        D3D11RenderTarget* d3d11RenderTarget = dynamic_cast<D3D11RenderTarget*>(mActiveRenderTarget);
+        if (mActiveRenderTarget && d3d11RenderTarget)
         {
-            ID3D11RenderTargetView * pRTView[OGRE_MAX_MULTIPLE_RENDER_TARGETS];
+            ID3D11RenderTargetView* pRTView[OGRE_MAX_MULTIPLE_RENDER_TARGETS];
             memset(pRTView, 0, sizeof(pRTView));
 
-            mActiveRenderTarget->getCustomAttribute( "ID3D11RenderTargetView", &pRTView );
-            
+            for (uint i = 0; i < OGRE_MAX_MULTIPLE_RENDER_TARGETS; i++)
+            {
+                pRTView[i] = d3d11RenderTarget->getRenderTargetView(i);
+                if (!pRTView[i])
+                {
+                    break;
+                }
+            }
+
             if (buffers & FBT_COLOUR)
             {
                 float ClearColor[4];
                 D3D11Mappings::get(colour, ClearColor);
 
                 // Clear all views
-                uint numberOfViews;
-                mActiveRenderTarget->getCustomAttribute( "numberOfViews", &numberOfViews );
-                if( numberOfViews == 1 )
-                    mDevice.GetImmediateContext()->ClearRenderTargetView( pRTView[0], ClearColor );
-                else
+                uint numberOfViews = d3d11RenderTarget->getNumberOfViews();
+                for (uint i = 0; i < numberOfViews; ++i)
                 {
-                    for( uint i = 0; i < numberOfViews; ++i )
-                        mDevice.GetImmediateContext()->ClearRenderTargetView( pRTView[i], ClearColor );
+                    mDevice.GetImmediateContext()->ClearRenderTargetView(pRTView[i], ClearColor);
                 }
 
             }
@@ -3416,6 +3082,11 @@ namespace Ogre
                                                                                         getDepthBuffer());
                 if( depthBuffer )
                 {
+                    if (isReverseDepthBufferEnabled())
+                    {
+                        depth = 1.0f - 0.5f * (depth + 1.0f);
+                    }
+
                     mDevice.GetImmediateContext()->ClearDepthStencilView(
                                                         depthBuffer->getDepthStencilView(),
                                                         ClearFlags, depth, static_cast<UINT8>(stencil) );
@@ -3424,118 +3095,11 @@ namespace Ogre
         }
     }
     //---------------------------------------------------------------------
-    void D3D11RenderSystem::_makeProjectionMatrix(Real left, Real right, 
-        Real bottom, Real top, Real nearPlane, Real farPlane, Matrix4& dest,
-        bool forGpuProgram)
-    {
-        // Correct position for off-axis projection matrix
-        if (!forGpuProgram)
-        {
-            Real offsetX = left + right;
-            Real offsetY = top + bottom;
-
-            left -= offsetX;
-            right -= offsetX;
-            top -= offsetY;
-            bottom -= offsetY;
-        }
-
-        Real width = right - left;
-        Real height = top - bottom;
-        Real q, qn;
-        if (farPlane == 0)
-        {
-            q = 1 - Frustum::INFINITE_FAR_PLANE_ADJUST;
-            qn = nearPlane * (Frustum::INFINITE_FAR_PLANE_ADJUST - 1);
-        }
-        else
-        {
-            q = farPlane / ( farPlane - nearPlane );
-            qn = -q * nearPlane;
-        }
-        dest = Matrix4::ZERO;
-        dest[0][0] = 2 * nearPlane / width;
-        dest[0][2] = (right+left) / width;
-        dest[1][1] = 2 * nearPlane / height;
-        dest[1][2] = (top+bottom) / height;
-        if (forGpuProgram)
-        {
-            dest[2][2] = -q;
-            dest[3][2] = -1.0f;
-        }
-        else
-        {
-            dest[2][2] = q;
-            dest[3][2] = 1.0f;
-        }
-        dest[2][3] = qn;
-    }
-
-    //---------------------------------------------------------------------
     HardwareOcclusionQuery* D3D11RenderSystem::createHardwareOcclusionQuery(void)
     {
         D3D11HardwareOcclusionQuery* ret = new D3D11HardwareOcclusionQuery (mDevice); 
         mHwOcclusionQueries.push_back(ret);
         return ret;
-    }
-    //---------------------------------------------------------------------
-    Real D3D11RenderSystem::getHorizontalTexelOffset(void)
-    {
-        // D3D11 is now like GL
-        return 0.0f;
-    }
-    //---------------------------------------------------------------------
-    Real D3D11RenderSystem::getVerticalTexelOffset(void)
-    {
-        // D3D11 is now like GL
-        return 0.0f;
-    }
-    //---------------------------------------------------------------------
-    void D3D11RenderSystem::_applyObliqueDepthProjection(Matrix4& matrix, const Plane& plane, 
-        bool forGpuProgram)
-    {
-        // Thanks to Eric Lenyel for posting this calculation at www.terathon.com
-
-        // Calculate the clip-space corner point opposite the clipping plane
-        // as (sgn(clipPlane.x), sgn(clipPlane.y), 1, 1) and
-        // transform it into camera space by multiplying it
-        // by the inverse of the projection matrix
-
-        /* generalised version
-        Vector4 q = matrix.inverse() * 
-            Vector4(Math::Sign(plane.normal.x), Math::Sign(plane.normal.y), 1.0f, 1.0f);
-        */
-        Vector4 q;
-        q.x = Math::Sign(plane.normal.x) / matrix[0][0];
-        q.y = Math::Sign(plane.normal.y) / matrix[1][1];
-        q.z = 1.0F; 
-        // flip the next bit from Lengyel since we're right-handed
-        if (forGpuProgram)
-        {
-            q.w = (1.0F - matrix[2][2]) / matrix[2][3];
-        }
-        else
-        {
-            q.w = (1.0F + matrix[2][2]) / matrix[2][3];
-        }
-
-        // Calculate the scaled plane vector
-        Vector4 clipPlane4d(plane.normal.x, plane.normal.y, plane.normal.z, plane.d);
-        Vector4 c = clipPlane4d * (1.0F / (clipPlane4d.dotProduct(q)));
-
-        // Replace the third row of the projection matrix
-        matrix[2][0] = c.x;
-        matrix[2][1] = c.y;
-        // flip the next bit from Lengyel since we're right-handed
-        if (forGpuProgram)
-        {
-            matrix[2][2] = c.z; 
-        }
-        else
-        {
-            matrix[2][2] = -c.z; 
-        }
-        matrix[2][3] = c.w;        
     }
     //---------------------------------------------------------------------
     Real D3D11RenderSystem::getMinimumDepthInputValue(void)
@@ -3551,37 +3115,19 @@ namespace Ogre
         return -1.0f;
     }
     //---------------------------------------------------------------------
-    void D3D11RenderSystem::registerThread()
-    {
-        // nothing to do - D3D11 shares rendering context already
-    }
-    //---------------------------------------------------------------------
-    void D3D11RenderSystem::unregisterThread()
-    {
-        // nothing to do - D3D11 shares rendering context already
-    }
-    //---------------------------------------------------------------------
-    void D3D11RenderSystem::preExtraThreadsStarted()
-    {
-        // nothing to do - D3D11 shares rendering context already
-    }
-    //---------------------------------------------------------------------
-    void D3D11RenderSystem::postExtraThreadsStarted()
-    {
-        // nothing to do - D3D11 shares rendering context already
-    }
-    //---------------------------------------------------------------------
     void D3D11RenderSystem::determineFSAASettings(uint fsaa, const String& fsaaHint, 
         DXGI_FORMAT format, DXGI_SAMPLE_DESC* outFSAASettings)
     {
-        bool qualityHint = fsaa >= 8 && fsaaHint.find("Quality") != String::npos;
-        
-        // NVIDIA, AMD - prefer CSAA aka EQAA if available.
-        // see http://developer.nvidia.com/object/coverage-sampled-aa.html
-        // see http://developer.amd.com/wordpress/media/2012/10/EQAA%20Modes%20for%20AMD%20HD%206900%20Series%20Cards.pdf
+        // "4f8" -> hint = "f8"
+        bool useCSAA = !fsaaHint.empty() && fsaaHint.front() == 'f';
+        uint32 quality = 0;
+        if(useCSAA) StringConverter::parse(fsaaHint.substr(1), quality);
+
+        // NVIDIA, AMD - enable CSAA
+        // http://developer.download.nvidia.com/assets/gamedev/docs/CSAA_Tutorial.pdf
+        // http://developer.amd.com/wordpress/media/2012/10/EQAA%20Modes%20for%20AMD%20HD%206900%20Series%20Cards.pdf
 
         // Modes are sorted from high quality to low quality, CSAA aka EQAA are listed first
-        // Note, that max(Count, Quality) == FSAA level and (Count >= 8 && Quality != 0) == quality hint
         DXGI_SAMPLE_DESC presets[] = {
                 { 8, 16 }, // CSAA 16xQ, EQAA 8f16x
                 { 4, 16 }, // CSAA 16x,  EQAA 4f16x
@@ -3600,13 +3146,11 @@ namespace Ogre
                 { NULL },
         };
 
-        // Skip too HQ modes
+        // Find matching AA mode
         DXGI_SAMPLE_DESC* mode = presets;
         for(; mode->Count != 0; ++mode)
         {
-            unsigned modeFSAA = std::max(mode->Count, mode->Quality);
-            bool modeQuality = mode->Count >= 8 && mode->Quality != 0;
-            bool tooHQ = (modeFSAA > fsaa || modeFSAA == fsaa && modeQuality && !qualityHint);
+            bool tooHQ = (mode->Count > fsaa || mode->Quality > quality);
             if(!tooHQ)
                 break;
         }
@@ -3677,14 +3221,6 @@ namespace Ogre
 
         ZeroMemory( &mDepthStencilDesc, sizeof(mDepthStencilDesc));
         ZeroMemory( &mScissorRect, sizeof(mScissorRect));
-
-        // set filters to defaults
-        for (size_t n = 0; n < OGRE_MAX_TEXTURE_LAYERS; n++)
-        {
-            FilterMinification[n] = FO_NONE;
-            FilterMagnification[n] = FO_NONE;
-            FilterMips[n] = FO_NONE;
-        }
 
         mPolygonMode = PM_SOLID;
         mRasterizerDesc.FillMode = D3D11Mappings::get(mPolygonMode);

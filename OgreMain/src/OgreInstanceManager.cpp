@@ -31,7 +31,6 @@ THE SOFTWARE.
 #include "OgreInstanceBatchHW_VTF.h"
 #include "OgreInstanceBatchShader.h"
 #include "OgreInstanceBatchVTF.h"
-#include "OgreIteratorWrappers.h"
 
 namespace Ogre
 {
@@ -439,6 +438,10 @@ namespace Ogre
         //Return default
         return BatchSettings().setting[id];
     }
+    bool InstanceManager::hasSettings(const String& materialName) const
+    {
+        return mBatchSettings.find(materialName) != mBatchSettings.end();
+    }
     //-----------------------------------------------------------------------
     void InstanceManager::applySettingToBatches( BatchSettingId id, bool value,
                                                  const InstanceBatchVec &container )
@@ -512,8 +515,11 @@ namespace Ogre
     template< typename TIndexType >
     IndicesMap getUsedIndices(IndexData* idxData)
     {
-        TIndexType *data = (TIndexType*)idxData->indexBuffer->lock(idxData->indexStart * sizeof(TIndexType), 
-            idxData->indexCount * sizeof(TIndexType), HardwareBuffer::HBL_READ_ONLY);
+        HardwareBufferLockGuard indexLock(idxData->indexBuffer,
+                                          idxData->indexStart * sizeof(TIndexType),
+                                          idxData->indexCount * sizeof(TIndexType),
+                                          HardwareBuffer::HBL_READ_ONLY);
+        TIndexType *data = (TIndexType*)indexLock.pData;
 
         IndicesMap indicesMap;
         for (size_t i = 0; i < idxData->indexCount; i++) 
@@ -527,22 +533,22 @@ namespace Ogre
             }
         }
 
-        idxData->indexBuffer->unlock();
         return indicesMap;
     }
     //-----------------------------------------------------------------------
     template< typename TIndexType >
     void copyIndexBuffer(IndexData* idxData, IndicesMap& indicesMap)
     {
-        TIndexType *data = (TIndexType*)idxData->indexBuffer->lock(idxData->indexStart * sizeof(TIndexType), 
-            idxData->indexCount * sizeof(TIndexType), HardwareBuffer::HBL_NORMAL);
+        HardwareBufferLockGuard indexLock(idxData->indexBuffer,
+                                          idxData->indexStart * sizeof(TIndexType),
+                                          idxData->indexCount * sizeof(TIndexType),
+                                          HardwareBuffer::HBL_NORMAL);
+        TIndexType *data = (TIndexType*)indexLock.pData;
 
         for (uint32 i = 0; i < idxData->indexCount; i++) 
         {
             data[i] = (TIndexType)indicesMap[data[i]];
         }
-
-        idxData->indexBuffer->unlock();
     }
     //-----------------------------------------------------------------------
     void InstanceManager::unshareVertices(const Ogre::MeshPtr &mesh)
@@ -578,18 +584,16 @@ namespace Ogre
                 HardwareVertexBufferSharedPtr newVertexBuffer = HardwareBufferManager::getSingleton().createVertexBuffer
                     (vertexSize, newVertexData->vertexCount, sharedVertexBuffer->getUsage(), sharedVertexBuffer->hasShadowBuffer());
 
-                uint8 *oldLock = (uint8*)sharedVertexBuffer->lock(0, sharedVertexData->vertexCount * vertexSize, HardwareBuffer::HBL_READ_ONLY);
-                uint8 *newLock = (uint8*)newVertexBuffer->lock(0, newVertexData->vertexCount * vertexSize, HardwareBuffer::HBL_NORMAL);
+                HardwareBufferLockGuard oldLock(sharedVertexBuffer, 0, sharedVertexData->vertexCount * vertexSize, HardwareBuffer::HBL_READ_ONLY);
+                HardwareBufferLockGuard newLock(newVertexBuffer, 0, newVertexData->vertexCount * vertexSize, HardwareBuffer::HBL_NORMAL);
 
                 IndicesMap::iterator indIt = indicesMap.begin();
                 IndicesMap::iterator endIndIt = indicesMap.end();
                 for (; indIt != endIndIt; ++indIt)
                 {
-                    memcpy(newLock + vertexSize * indIt->second, oldLock + vertexSize * indIt->first, vertexSize);
+                    memcpy((uint8*)newLock.pData + vertexSize * indIt->second,
+                           (uint8*)oldLock.pData + vertexSize * indIt->first, vertexSize);
                 }
-
-                sharedVertexBuffer->unlock();
-                newVertexBuffer->unlock();
 
                 newVertexData->vertexBufferBinding->setBinding(bufIdx, newVertexBuffer);
             }
@@ -626,6 +630,21 @@ namespace Ogre
         delete mesh->sharedVertexData;
         mesh->sharedVertexData = NULL;
         mesh->clearBoneAssignments();
+
+        if( mesh->isEdgeListBuilt() )
+        {
+            mesh->freeEdgeList();
+            mesh->buildEdgeList();
+        }
     }
     //-----------------------------------------------------------------------
+    InstanceManager::InstanceBatchIterator InstanceManager::getInstanceBatchIterator( const String &materialName ) const
+    {
+        InstanceBatchMap::const_iterator it = mInstanceBatches.find( materialName );
+        if(it != mInstanceBatches.end())
+            return InstanceBatchIterator( it->second.begin(), it->second.end() );
+
+        OGRE_EXCEPT(Exception::ERR_INVALID_STATE, "Cannot create instance batch iterator. "
+                    "Material " + materialName + " cannot be found");
+    }
 }

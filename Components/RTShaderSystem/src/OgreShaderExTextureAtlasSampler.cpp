@@ -93,8 +93,7 @@ bool TextureAtlasSampler::resolveParameters(ProgramSet* programSet)
     Parameter::Content indexContent = (Parameter::Content)((int)Parameter::SPC_TEXTURE_COORDINATE0 + mAtlasTexcoordPos);
     GpuConstantType indexType = GCT_FLOAT4;
 
-    mVSInpTextureTableIndex = vsMain->resolveInputParameter(Parameter::SPS_TEXTURE_COORDINATES, 
-                mAtlasTexcoordPos, indexContent, indexType);
+    mVSInpTextureTableIndex = vsMain->resolveInputParameter(indexContent, indexType);
         
     
     //
@@ -106,10 +105,8 @@ bool TextureAtlasSampler::resolveParameters(ProgramSet* programSet)
         if (mIsAtlasTextureUnits[i] == true)
         {
             mVSTextureTable[i] = vsProgram->resolveParameter(GCT_FLOAT4, -1, (uint16)GPV_GLOBAL, "AtlasData", mAtlasTableDatas[i]->size());
-            mVSOutTextureDatas[i] = vsMain->resolveOutputParameter(Parameter::SPS_TEXTURE_COORDINATES,
-                    -1, Parameter::SPC_UNKNOWN, GCT_FLOAT4);
-            mPSInpTextureDatas[i] = psMain->resolveInputParameter(Parameter::SPS_TEXTURE_COORDINATES, 
-                mVSOutTextureDatas[i]->getIndex(), Parameter::SPC_UNKNOWN, GCT_FLOAT4);
+            mVSOutTextureDatas[i] = vsMain->resolveOutputParameter(Parameter::SPC_UNKNOWN, GCT_FLOAT4);
+            mPSInpTextureDatas[i] = psMain->resolveInputParameter(mVSOutTextureDatas[i]);
             mPSTextureSizes[i] = psProgram->resolveParameter(GCT_FLOAT2,-1, (uint16)GPV_PER_OBJECT, "AtlasSize");
         }
     }
@@ -135,7 +132,7 @@ bool TextureAtlasSampler::addFunctionInvocations(ProgramSet* programSet)
     Function* vsMain   = vsProgram->getEntryPointFunction();    
     Program* psProgram = programSet->getCpuProgram(GPT_FRAGMENT_PROGRAM);
     Function* psMain   = psProgram->getEntryPointFunction();    
-    FunctionInvocation* curFuncInvocation = NULL;   
+    FunctionAtom* curFuncInvocation = NULL;
 
     //
     // Calculate the position and size of the texture in the atlas in the vertex shader
@@ -169,19 +166,15 @@ bool TextureAtlasSampler::addFunctionInvocations(ProgramSet* programSet)
 
     groupOrder = (FFP_PS_SAMPLING + FFP_PS_TEXTURING) / 2;
 
-    const ShaderParameterList& inpParams = psMain->getInputParameters();
-    const ShaderParameterList& localParams = psMain->getLocalParameters();
-    
-    ParameterPtr psAtlasTextureCoord = psMain->resolveLocalParameter(Parameter::SPS_UNKNOWN, 
-        -1, "atlasCoord", GCT_FLOAT2);
+    ParameterPtr psAtlasTextureCoord = psMain->resolveLocalParameter(GCT_FLOAT2, "atlasCoord");
 
     for(ushort j = 0 ; j <  TAS_MAX_TEXTURES; ++j)
     {
         if (mIsAtlasTextureUnits[j] == true)
         {
             //Find the texture coordinates texel and sampler from the original FFPTexturing
-            ParameterPtr texcoord = psMain->getParameterByContent(inpParams, (Parameter::Content)(Parameter::SPC_TEXTURE_COORDINATE0 + j), GCT_FLOAT2);
-            ParameterPtr texel = psMain->getParameterByName(localParams, c_ParamTexel + Ogre::StringConverter::toString(j));
+            ParameterPtr texcoord = psMain->getInputParameter((Parameter::Content)(Parameter::SPC_TEXTURE_COORDINATE0 + j), GCT_FLOAT2);
+            ParameterPtr texel = psMain->getLocalParameter(c_ParamTexel + StringConverter::toString(j));
             UniformParameterPtr sampler = psProgram->getParameterByType(GCT_SAMPLER2D, j);
                 
             const char* addressUFuncName = getAdressingFunctionName(mTextureAddressings[j].u);
@@ -250,7 +243,7 @@ void TextureAtlasSampler::copyFrom(const SubRenderState& rhs)
 }
 
 //-----------------------------------------------------------------------
-void TextureAtlasSampler::updateGpuProgramsParams(Renderable* rend, Pass* pass,  const AutoParamDataSource* source, const LightList* pLightList)
+void TextureAtlasSampler::updateGpuProgramsParams(Renderable* rend, const Pass* pass,  const AutoParamDataSource* source, const LightList* pLightList)
 {
     if (mIsTableDataUpdated == false)
     {
@@ -416,9 +409,9 @@ bool TextureAtlasSamplerFactory::addTexutreAtlasDefinition( DataStreamPtr stream
                     String textureName = strings[1];
 
                     TextureAtlasMap::iterator it = tmpMap.find(textureName);
-                    if (tmpMap.find(textureName) == tmpMap.end())
+                    if (it == tmpMap.end())
                     {
-                        it = tmpMap.insert(TextureAtlasMap::value_type(textureName, TextureAtlasTablePtr(new TextureAtlasTable))).first;
+                        it = tmpMap.emplace(textureName, TextureAtlasTablePtr(new TextureAtlasTable)).first;
                     }
                     
                     // file line format:  <original texture filename>/t/t<atlas filename>, <atlas idx>, <atlas type>, <woffset>, <hoffset>, <depth offset>, <width>, <height>
@@ -469,7 +462,7 @@ void TextureAtlasSamplerFactory::setTextureAtlasTable(const String& textureName,
 {
     if (!atlasData || atlasData->empty())
         removeTextureAtlasTable(textureName);
-    else mAtlases.insert(TextureAtlasMap::value_type(textureName, atlasData));
+    else mAtlases.emplace(textureName, atlasData);
 }
 
 //-----------------------------------------------------------------------
@@ -514,7 +507,7 @@ void TextureAtlasSamplerFactory::setMaterialAtlasingAttributes(Ogre::Material* m
     if ((material) && (material->getNumTechniques()))
     {
         material->getTechnique(0)->getUserObjectBindings().setUserAny(c_RTAtlasKey, 
-            Ogre::Any(TextureAtlasAttib(mode, offset, autoAdjustBorders)));
+            TextureAtlasAttib(mode, offset, autoAdjustBorders));
     }
 }
 

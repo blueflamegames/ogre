@@ -176,9 +176,7 @@ namespace Ogre
 #endif
             }
 
-            std::fstream *f = OGRE_NEW_T(std::fstream, MEMCATEGORY_GENERAL)();
-            f->open(mTempFileName.c_str(), std::ios::binary | std::ios::out);
-            mTmpWriteStream = DataStreamPtr(OGRE_NEW FileStreamDataStream(f));
+            mTmpWriteStream = _openFileStream(mTempFileName, std::ios::binary | std::ios::out);
             
         }
 
@@ -198,7 +196,6 @@ namespace Ogre
     DeflateStream::~DeflateStream()
     {
         close();
-        destroy();
     }
     //---------------------------------------------------------------------
     size_t DeflateStream::read(void* buf, size_t count)
@@ -262,10 +259,10 @@ namespace Ogre
                         }
                     }
                 }
-            }
             
-            // Cache the last bytes read
-            mReadCache.cacheData((char*)buf + cachereads, newReadUncompressed);
+                // Cache the last bytes read not from cache
+                mReadCache.cacheData((char*)buf + cachereads, newReadUncompressed);
+            }
             
             mCurrentPos += newReadUncompressed + cachereads;
             
@@ -286,6 +283,7 @@ namespace Ogre
     {
         // Close temp stream
         mTmpWriteStream->close();
+        mTmpWriteStream.reset();
         
         // Copy & compress
         // We do this rather than compress directly because some code seeks
@@ -404,6 +402,7 @@ namespace Ogre
                 mCompressedStream->seek(0);
                 mZStream->avail_in = static_cast<uint>(mCompressedStream->read(mTmp, getAvailInForSinglePass()));
                 inflateReset(mZStream);
+                mReadCache.clear();
             }
             else 
             {
@@ -445,10 +444,12 @@ namespace Ogre
     void DeflateStream::close(void)
     {
         if (getAccessMode() & WRITE)
-        {
             compressFinal();
-        }
-        
+
+        destroy();
+
+        mAccess = 0;
+
         // don't close underlying compressed stream in case used for something else
     }
     //---------------------------------------------------------------------

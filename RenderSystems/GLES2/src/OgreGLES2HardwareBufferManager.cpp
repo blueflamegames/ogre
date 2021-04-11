@@ -27,9 +27,7 @@ THE SOFTWARE.
 */
 
 #include "OgreGLES2HardwareBufferManager.h"
-#include "OgreGLES2HardwareVertexBuffer.h"
-#include "OgreGLES2HardwareIndexBuffer.h"
-#include "OgreGLES2HardwareUniformBuffer.h"
+#include "OgreGLES2HardwareBuffer.h"
 #include "OgreGLES2RenderToVertexBuffer.h"
 #include "OgreGLES2RenderSystem.h"
 #include "OgreGLVertexArrayObject.h"
@@ -70,13 +68,13 @@ namespace Ogre {
         if(!mRenderSystem->getCapabilities()->hasCapability(RSC_MAPBUFFER))
             useShadowBuffer = true;
 
-        GLES2HardwareVertexBuffer* buf = OGRE_NEW GLES2HardwareVertexBuffer(this, vertexSize, numVerts, usage, useShadowBuffer);
-
+        auto impl = new GLES2HardwareBuffer(GL_ARRAY_BUFFER, vertexSize * numVerts, usage, useShadowBuffer);
+        auto buf = std::make_shared<HardwareVertexBuffer>(this, vertexSize, numVerts, impl);
         {
             OGRE_LOCK_MUTEX(mVertexBuffersMutex);
-            mVertexBuffers.insert(buf);
+            mVertexBuffers.insert(buf.get());
         }
-        return HardwareVertexBufferSharedPtr(buf);
+        return buf;
     }
 
     HardwareIndexBufferSharedPtr GLES2HardwareBufferManager::createIndexBuffer(HardwareIndexBuffer::IndexType itype,
@@ -87,13 +85,15 @@ namespace Ogre {
         if(!mRenderSystem->getCapabilities()->hasCapability(RSC_MAPBUFFER))
             useShadowBuffer = true;
 
-        GLES2HardwareIndexBuffer* buf = OGRE_NEW GLES2HardwareIndexBuffer(this, itype, numIndexes, usage, useShadowBuffer);
+        auto indexSize = HardwareIndexBuffer::indexSize(itype);
+        auto impl = new GLES2HardwareBuffer(GL_ELEMENT_ARRAY_BUFFER, indexSize * numIndexes, usage, useShadowBuffer);
 
+        auto buf = std::make_shared<HardwareIndexBuffer>(this, itype, numIndexes, impl);
         {
             OGRE_LOCK_MUTEX(mIndexBuffersMutex);
-            mIndexBuffers.insert(buf);
+            mIndexBuffers.insert(buf.get());
         }
-        return HardwareIndexBufferSharedPtr(buf);
+        return buf;
     }
 
     RenderToVertexBufferSharedPtr GLES2HardwareBufferManager::createRenderToVertexBuffer()
@@ -108,12 +108,6 @@ namespace Ogre {
     VertexDeclaration* GLES2HardwareBufferManager::createVertexDeclarationImpl(void)
     {
         return OGRE_NEW GLVertexArrayObject();
-    }
-
-    void GLES2HardwareBufferManager::destroyVertexDeclarationImpl(VertexDeclaration* decl)
-    {
-        if(decl)
-            OGRE_DELETE decl;
     }
 
     GLenum GLES2HardwareBufferManager::getGLType(VertexElementType type)
@@ -170,29 +164,20 @@ namespace Ogre {
     }
 
     //---------------------------------------------------------------------
-    Ogre::HardwareUniformBufferSharedPtr GLES2HardwareBufferManager::createUniformBuffer( size_t sizeBytes, HardwareBuffer::Usage usage, bool useShadowBuffer, const String& name )
+    HardwareUniformBufferSharedPtr GLES2HardwareBufferManager::createUniformBuffer( size_t sizeBytes, HardwareBuffer::Usage usage, bool useShadowBuffer, const String& name )
     {
-        if(!mRenderSystem->hasMinGLVersion(3, 0))
+        if (!mRenderSystem->hasMinGLVersion(3, 0))
         {
-            OGRE_EXCEPT(Exception::ERR_RENDERINGAPI_ERROR,
-                "GLES2 does not support uniform buffer objects",
-                "GLES2HardwareBufferManager::createUniformBuffer");
+            OGRE_EXCEPT(Exception::ERR_RENDERINGAPI_ERROR, "GLES2 does not support uniform buffer objects");
         }
 
-        GLES2HardwareUniformBuffer* buf =
-            new GLES2HardwareUniformBuffer(this, sizeBytes, usage, useShadowBuffer, name);
+        auto impl = new GLES2HardwareBuffer(GL_UNIFORM_BUFFER, sizeBytes, usage, useShadowBuffer);
+        auto buf = std::make_shared<HardwareUniformBuffer>(this, impl);
         {
             OGRE_LOCK_MUTEX(mUniformBuffersMutex);
-            mUniformBuffers.insert(buf);
+            mUniformBuffers.insert(buf.get());
         }
-        return HardwareUniformBufferSharedPtr(buf);
-    }
-    //---------------------------------------------------------------------
-    Ogre::HardwareCounterBufferSharedPtr GLES2HardwareBufferManager::createCounterBuffer( size_t sizeBytes, HardwareBuffer::Usage usage, bool useShadowBuffer, const String& name )
-    {
-        OGRE_EXCEPT(Exception::ERR_RENDERINGAPI_ERROR,
-                    "GLES2 does not support atomic counter buffers",
-                    "GLES2HardwareBufferManager::createCounterBuffer");
+        return buf;
     }
 
 }

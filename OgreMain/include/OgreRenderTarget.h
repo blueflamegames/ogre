@@ -228,8 +228,26 @@ namespace Ogre {
         void resetStatistics(void);
 
         /** Retrieve a platform or API-specific piece of information
-            This is a nasty way of satisfying any API's need to see platform-specific details.
-            It horrid, but D3D needs this kind of info. At least it's abstracted.
+
+            This method of retrieving information should only be used if you know what you're doing.
+
+            | Name        | Description                        |
+            |-------------|------------------------------------|
+            | WINDOW      | The native window handle. (X11 Window XID/ HWND / NSWindow*) |
+            | HWND        | deprecated (same as WINDOW) |
+            | GL_FBOID | the id of the OpenGL framebuffer object |
+            | GL_MULTISAMPLEFBOID | the id of the OpenGL framebuffer object used for multisampling |
+            | GLFBO | id of the screen OpenGL framebuffer object on iOS |
+            | GLCONTEXT   | deprecated, do not use |
+            | FBO | deprecated, do not use |
+            | TARGET | deprecated, do not use |
+            | XDISPLAY     | The X Display connection behind that context. |
+            | DISPLAYNAME | The X Server name for the connected display. |
+            | ATOM        | The X Atom used in client delete events. |
+            | VIEW | Cocoa NSView* |
+            | NSOPENGLCONTEXT | Cocoa NSOpenGLContext* |
+            | NSOPENGLPIXELFORMAT | Cocoa NSOpenGLPixelFormat* |
+            
             @param name The name of the attribute.
             @param pData Pointer to memory of the right kind of structure to receive the info.
         */
@@ -357,32 +375,25 @@ namespace Ogre {
         */
         virtual uint getFSAA() const { return mFSAA; }
 
-        /** Gets the FSAA hint (@see Root::createRenderWindow)
-        */
+        /// RenderSystem specific FSAA option. See @ref RenderSystem::_createRenderWindow for details.
         virtual const String& getFSAAHint() const { return mFSAAHint; }
 
         /** Set the level of multisample AA to be used if hardware support it.
             This option will be ignored if the hardware does not support it 
             or setting can not be changed on the fly on per-target level. 
             @param fsaa The number of samples
-            @param fsaaHint Any hinting text (@see Root::createRenderWindow)
+            @param fsaaHint @copybrief getFSAAHint
         */
         virtual void setFSAA(uint fsaa, const String& fsaaHint) { }
 
-        /** RenderSystem specific interface for a RenderTarget;
-            this should be subclassed by RenderSystems.
-        */
+        /// @deprecated do not use
         class Impl
         {
         protected:
             ~Impl() { }
         };
-        /** Get rendersystem specific interface for this RenderTarget.
-            This is used by the RenderSystem to (un)bind this target, 
-            and to get specific information like surfaces
-            and framebuffer objects.
-        */
-        virtual Impl *_getImpl();
+        /// @deprecated do not use
+        OGRE_DEPRECATED virtual Impl *_getImpl();
 
         /** Method for manual management of rendering : fires 'preRenderTargetUpdate'
             and initialises statistics etc.

@@ -64,13 +64,6 @@ namespace Ogre {
             String doGet(const void* target) const;
             void doSet(void* target, const String& val);
         };
-        /// Command object for setting macro defines
-        class CmdPreprocessorDefines : public ParamCommand
-        {
-        public:
-            String doGet(const void* target) const;
-            void doSet(void* target, const String& val);
-        };
         /// Command object for setting matrix packing in column-major order
         class CmdColumnMajorMatrices : public ParamCommand
         {
@@ -90,16 +83,14 @@ namespace Ogre {
 
         static CmdEntryPoint msCmdEntryPoint;
         static CmdTarget msCmdTarget;
-        static CmdPreprocessorDefines msCmdPreprocessorDefines;
         static CmdColumnMajorMatrices msCmdColumnMajorMatrices;
         static CmdEnableBackwardsCompatibility msCmdEnableBackwardsCompatibility;
         
         void notifyDeviceLost(D3D11Device* device);
         void notifyDeviceRestored(D3D11Device* device);
 
-        /** Internal method for creating an appropriate low-level program from this
-        high-level program, must be implemented by subclasses. */
-        void createLowLevelImpl(void);
+        /// noop
+        void createLowLevelImpl(void) {}
         /// Internal unload implementation, must be implemented by subclasses
         void unloadHighLevelImpl(void);
         /// Populate the passed parameters with name->index map, must be overridden
@@ -120,9 +111,6 @@ namespace Ogre {
         bool mErrorsInCompile;
         MicroCode mMicroCode;
         ComPtr<ID3D11Buffer> mConstantBuffer;
-        
-        D3D_SHADER_MACRO* mShaderMacros;
-        bool shaderMacroSet;
 
         D3D11Device & mDevice;
 
@@ -302,9 +290,7 @@ namespace Ogre {
         /** Gets the shader target to compile down to, e.g. 'vs_1_1'. */
         const String& getTarget(void) const { return mTarget; }
         /** Gets the shader target promoted to the first compatible, e.g. 'vs_4_0' or 'ps_4_0' if backward compatibility is enabled. */
-        const String& getCompatibleTarget(void) const;
-        /** Sets shader macros created manually*/
-        void setShaderMacros(D3D_SHADER_MACRO* shaderMacros);
+        const char* getCompatibleTarget(void) const;
 
         /** Sets whether matrix packing in column-major order. */ 
         void setColumnMajorMatrices(bool columnMajor) { mColumnMajorMatrices = columnMajor; }
@@ -346,9 +332,14 @@ namespace Ogre {
         void CreateHullShader();
         void CreateComputeShader();
 
+        /// shortcut as we there is no low-level separation here
+        GpuProgram* _getBindingDelegate(void) { return this; }
+
         /** Internal load implementation, must be implemented by subclasses.
         */
         void loadFromSource(void);
+
+        void prepareImpl();
 
         void reinterpretGSForStreamOut(void);
         bool mReinterpretingGS;

@@ -166,14 +166,11 @@ namespace Ogre {
         , mFogDensity(0.001)
         , mPassIterationCount(1)
         , mLineWidth(1.0f)
-        , mPointSize(1.0f)
         , mPointMinSize(0.0f)
         , mPointMaxSize(0.0f)
+        , mPointAttenution(1.0f, 1.0f, 0.0f, 0.0f)
         , mIlluminationStage(IS_UNKNOWN)
     {
-        mPointAttenuationCoeffs[0] = 1.0f;
-        mPointAttenuationCoeffs[1] = mPointAttenuationCoeffs[2] = 0.0f;
-
         // init the hash inline
         _recalculateHash();
    }
@@ -240,12 +237,11 @@ namespace Ogre {
         mPolygonModeOverrideable = oth.mPolygonModeOverrideable;
         mPassIterationCount = oth.mPassIterationCount;
         mLineWidth = oth.mLineWidth;
-        mPointSize = oth.mPointSize;
+        mPointAttenution = oth.mPointAttenution;
         mPointMinSize = oth.mPointMinSize;
         mPointMaxSize = oth.mPointMaxSize;
         mPointSpritesEnabled = oth.mPointSpritesEnabled;
         mPointAttenuationEnabled = oth.mPointAttenuationEnabled;
-        memcpy(mPointAttenuationCoeffs, oth.mPointAttenuationCoeffs, sizeof(Real)*3);
         mShadowContentTypeLookup = oth.mShadowContentTypeLookup;
         mContentTypeLookupBuilt = oth.mContentTypeLookupBuilt;
         mLightScissoring = oth.mLightScissoring;
@@ -339,11 +335,6 @@ namespace Ogre {
         mName = name;
     }
     //-----------------------------------------------------------------------
-    void Pass::setPointSize(Real ps)
-    {
-        mPointSize = ps;
-    }
-    //-----------------------------------------------------------------------
     void Pass::setPointSpritesEnabled(bool enabled)
     {
         mPointSpritesEnabled = enabled;
@@ -354,33 +345,17 @@ namespace Ogre {
         return mPointSpritesEnabled;
     }
     //-----------------------------------------------------------------------
-    void Pass::setPointAttenuation(bool enabled,
-        Real constant, Real linear, Real quadratic)
+    void Pass::setPointAttenuation(bool enabled, float constant, float linear, float quadratic)
     {
         mPointAttenuationEnabled = enabled;
-        mPointAttenuationCoeffs[0] = constant;
-        mPointAttenuationCoeffs[1] = linear;
-        mPointAttenuationCoeffs[2] = quadratic;
+        mPointAttenution[1] = enabled ? constant : 1.0f;
+        mPointAttenution[2] = enabled ? linear : 0.0f;
+        mPointAttenution[3] = enabled ? quadratic : 0.0f;
     }
     //-----------------------------------------------------------------------
     bool Pass::isPointAttenuationEnabled(void) const
     {
         return mPointAttenuationEnabled;
-    }
-    //-----------------------------------------------------------------------
-    Real Pass::getPointAttenuationConstant(void) const
-    {
-        return mPointAttenuationCoeffs[0];
-    }
-    //-----------------------------------------------------------------------
-    Real Pass::getPointAttenuationLinear(void) const
-    {
-        return mPointAttenuationCoeffs[1];
-    }
-    //-----------------------------------------------------------------------
-    Real Pass::getPointAttenuationQuadratic(void) const
-    {
-        return mPointAttenuationCoeffs[2];
     }
     //-----------------------------------------------------------------------
     void Pass::setPointMinSize(Real min)
@@ -465,11 +440,6 @@ namespace Ogre {
         mTracking = tracking;
     }
     //-----------------------------------------------------------------------
-    Real Pass::getPointSize(void) const
-    {
-        return mPointSize;
-    }
-    //-----------------------------------------------------------------------
     const ColourValue& Pass::getAmbient(void) const
     {
         return mAmbient;
@@ -542,14 +512,15 @@ namespace Ogre {
                     // This sprintf replaced a call to StringConverter::toString for performance reasons
                     state->setName( StringUtil::format("%lx", static_cast<long>(idx)));
                     
+                    OGRE_IGNORE_DEPRECATED_BEGIN
                     /** since the name was never set and a default one has been made, clear the alias name
                      so that when the texture unit name is set by the user, the alias name will be set to
                      that name
                     */
                     state->setTextureNameAlias(BLANKSTRING);
+                    OGRE_IGNORE_DEPRECATED_END
                 }
-                // Needs recompilation
-                mParent->_notifyNeedsRecompile();
+                _notifyNeedsRecompile();
                 _dirtyHash();
             }
             else
@@ -633,11 +604,7 @@ namespace Ogre {
         TextureUnitStates::iterator i = mTextureUnitStates.begin() + index;
         OGRE_DELETE *i;
         mTextureUnitStates.erase(i);
-        if (!mQueuedForDeletion)
-        {
-            // Needs recompilation
-            mParent->_notifyNeedsRecompile();
-        }
+        _notifyNeedsRecompile();
         _dirtyHash();
         mContentTypeLookupBuilt = false;
     }
@@ -652,11 +619,7 @@ namespace Ogre {
             OGRE_DELETE *i;
         }
         mTextureUnitStates.clear();
-        if (!mQueuedForDeletion)
-        {
-            // Needs recompilation
-            mParent->_notifyNeedsRecompile();
-        }
+        _notifyNeedsRecompile();
         _dirtyHash();
         mContentTypeLookupBuilt = false;
     }
@@ -1260,7 +1223,7 @@ namespace Ogre {
             programUsage->setProgram(program, resetParams);
         }
         // Needs recompilation
-        mParent->_notifyNeedsRecompile();
+        _notifyNeedsRecompile();
 
         if( Pass::getHashFunction() == Pass::getBuiltinHashFunction( Pass::MIN_GPU_PROGRAM_CHANGE ) )
         {
@@ -1452,6 +1415,9 @@ namespace Ogre {
     //-----------------------------------------------------------------------
     void Pass::_dirtyHash(void)
     {
+        if (mQueuedForDeletion)
+            return;
+
         Material* mat = mParent->getParent();
         if (mat->isLoading() || mat->isLoaded())
         {
@@ -1474,7 +1440,8 @@ namespace Ogre {
     //-----------------------------------------------------------------------
     void Pass::_notifyNeedsRecompile(void)
     {
-        mParent->_notifyNeedsRecompile();
+        if (!mQueuedForDeletion)
+            mParent->_notifyNeedsRecompile();
     }
     //-----------------------------------------------------------------------
     void Pass::setTextureFiltering(TextureFilterOptions filterType)
@@ -1593,8 +1560,7 @@ namespace Ogre {
             }
             mShadowCasterVertexProgramUsage->setProgramName(name);
         }
-        // Needs recompilation
-        mParent->_notifyNeedsRecompile();
+        _notifyNeedsRecompile();
     }
     //-----------------------------------------------------------------------
     void Pass::setShadowCasterVertexProgramParameters(GpuProgramParametersSharedPtr params)
@@ -1647,8 +1613,7 @@ namespace Ogre {
             }
             mShadowCasterFragmentProgramUsage->setProgramName(name);
         }
-        // Needs recompilation
-        mParent->_notifyNeedsRecompile();
+        _notifyNeedsRecompile();
     }
     //-----------------------------------------------------------------------
     void Pass::setShadowCasterFragmentProgramParameters(GpuProgramParametersSharedPtr params)
@@ -1707,8 +1672,7 @@ namespace Ogre {
             }
             mShadowReceiverVertexProgramUsage->setProgramName(name);
         }
-        // Needs recompilation
-        mParent->_notifyNeedsRecompile();
+        _notifyNeedsRecompile();
     }
     //-----------------------------------------------------------------------
     void Pass::setShadowReceiverVertexProgramParameters(GpuProgramParametersSharedPtr params)
@@ -1761,8 +1725,7 @@ namespace Ogre {
             }
             mShadowReceiverFragmentProgramUsage->setProgramName(name);
         }
-        // Needs recompilation
-        mParent->_notifyNeedsRecompile();
+        _notifyNeedsRecompile();
     }
     //-----------------------------------------------------------------------
     void Pass::setShadowReceiverFragmentProgramParameters(GpuProgramParametersSharedPtr params)
@@ -1815,8 +1778,10 @@ namespace Ogre {
 
         for (i = mTextureUnitStates.begin(); i != iend; ++i)
         {
+            OGRE_IGNORE_DEPRECATED_BEGIN
             if ((*i)->applyTextureAliases(aliasList, apply))
                 testResult = true;
+            OGRE_IGNORE_DEPRECATED_END
         }
 
         return testResult;

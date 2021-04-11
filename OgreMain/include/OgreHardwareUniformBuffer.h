@@ -54,13 +54,17 @@ namespace Ogre {
             /// Should be called by HardwareBufferManager
             HardwareUniformBuffer(HardwareBufferManagerBase* mgr, size_t sizeBytes, 
                             HardwareBuffer::Usage usage, bool useShadowBuffer = false, const String& name = "");
+            HardwareUniformBuffer(HardwareBufferManagerBase* mgr, HardwareBuffer* delegate);
             ~HardwareUniformBuffer();
-            /// Return the manager of this buffer, if any
-            HardwareBufferManagerBase* getManager() const { return mMgr; }
+            /// @deprecated do not use
+            OGRE_DEPRECATED HardwareBufferManagerBase* getManager() const { return mMgr; }
 
-            const String& getName() const { return mName; }
+            /// @deprecated do not use
+            OGRE_DEPRECATED const String& getName() const { return mName; }
 
     };
+
+    typedef HardwareUniformBuffer HardwareCounterBuffer;
 }
 
 #include "OgreHeaderSuffix.h"

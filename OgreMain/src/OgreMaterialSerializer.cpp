@@ -862,16 +862,17 @@ namespace Ogre
             // Fire write begin event.
             fireTextureUnitStateEvent(MSE_WRITE_BEGIN, skipWriting, pTex);
 
+            OGRE_IGNORE_DEPRECATED_BEGIN
             // texture_alias
-            if (!pTex->getTextureNameAlias().empty())
+            if (!pTex->getTextureNameAlias().empty() && pTex->getTextureNameAlias() != pTex->getName())
             {
                 writeAttribute(4, "texture_alias");
                 writeValue(quoteWord(pTex->getTextureNameAlias()));
             }
+            OGRE_IGNORE_DEPRECATED_END
 
             //texture name
-            if (pTex->getNumFrames() == 1 && !pTex->getTextureName().empty() &&
-                (!pTex->isCubic() || pTex->getTextureType() == TEX_TYPE_CUBE_MAP))
+            if (pTex->getNumFrames() == 1 && !pTex->getTextureName().empty())
             {
                 writeAttribute(4, "texture");
                 writeValue(quoteWord(pTex->getTextureName()));
@@ -884,6 +885,9 @@ namespace Ogre
                 case TEX_TYPE_2D:
                     // nothing, this is the default
                     break;
+                case TEX_TYPE_2D_ARRAY:
+                    writeValue("2darray");
+                    break;
                 case TEX_TYPE_3D:
                     writeValue("3d");
                     break;
@@ -894,14 +898,9 @@ namespace Ogre
                     break;
                 };
 
-                if (pTex->getNumMipmaps() != MIP_DEFAULT)
+                if (uint32(pTex->getNumMipmaps()) != TextureManager::getSingleton().getDefaultNumMipmaps())
                 {
                     writeValue(StringConverter::toString(pTex->getNumMipmaps()));
-                }
-
-                if (pTex->getIsAlpha())
-                {
-                    writeValue("alpha");
                 }
 
                 if (pTex->getDesiredFormat() != PF_UNKNOWN)
@@ -911,22 +910,12 @@ namespace Ogre
             }
 
             //anim. texture
-            if (pTex->getNumFrames() > 1 && !pTex->isCubic())
+            if (pTex->getNumFrames() > 1)
             {
                 writeAttribute(4, "anim_texture");
                 for (unsigned int n = 0; n < pTex->getNumFrames(); n++)
                     writeValue(quoteWord(pTex->getFrameTextureName(n)));
                 writeValue(StringConverter::toString(pTex->getAnimationDuration()));
-            }
-
-            //cubic texture separateUV
-            if (pTex->isCubic() && pTex->getTextureType() != TEX_TYPE_CUBE_MAP)
-            {
-                writeAttribute(4, "cubic_texture");
-                for (unsigned int n = 0; n < pTex->getNumFrames(); n++)
-                    writeValue(quoteWord(pTex->getFrameTextureName(n)));
-
-                writeValue("separateUV");
             }
 
             //anisotropy level
@@ -1146,18 +1135,6 @@ namespace Ogre
                     break;
                 case TextureUnitState::BT_VERTEX:
                     writeValue("vertex");
-                    break;
-                case TextureUnitState::BT_GEOMETRY:
-                    writeValue("geometry");
-                    break;
-                case TextureUnitState::BT_TESSELLATION_DOMAIN:
-                    writeValue("tessellation_domain");
-                    break;
-                case TextureUnitState::BT_TESSELLATION_HULL:
-                    writeValue("tessellation_hull");
-                    break;
-                case TextureUnitState::BT_COMPUTE:
-                    writeValue("compute");
                     break;
                 };
         
@@ -1575,13 +1552,11 @@ namespace Ogre
         GpuProgramParameters* defaultParams, unsigned short level,
         const bool useMainBuffer)
     {
-        GpuConstantDefinitionIterator constIt = params->getConstantDefinitionIterator();
-        while(constIt.hasMoreElements())
+        for(auto& it : params->getConstantDefinitions().map)
         {
             // get the constant definition
-            const String& paramName = constIt.peekNextKey();
-            const GpuConstantDefinition& def =
-                constIt.getNext();
+            const String& paramName = it.first;
+            const GpuConstantDefinition& def = it.second;
 
             // get any auto-link
             const GpuProgramParameters::AutoConstantEntry* autoEntry = 

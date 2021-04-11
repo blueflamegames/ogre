@@ -35,14 +35,14 @@
 
 #include "OgreInput.h"
 
-/** \addtogroup Optional
-*  @{
-*/
-/** \addtogroup Bites
-*  @{
-*/
 namespace OgreBites
 {
+    /** \addtogroup Optional
+    *  @{
+    */
+    /** \addtogroup Bites
+    *  @{
+    */
     enum CameraStyle   /// enumerator values for different styles of camera movement
     {
         CS_FREELOOK,
@@ -81,7 +81,7 @@ namespace OgreBites
         /**
         Sets the spatial offset from the target. Only applies for orbit style.
         */
-        void setYawPitchDist(Ogre::Radian yaw, Ogre::Radian pitch, Ogre::Real dist);
+        void setYawPitchDist(const Ogre::Radian& yaw, const Ogre::Radian& pitch, Ogre::Real dist);
 
         /**
         Sets the camera's top speed. Only applies for free-look style.
@@ -142,9 +142,20 @@ namespace OgreBites
         */
         bool mouseReleased(const MouseButtonEvent& evt);
 
+        /**
+         * fix the yaw axis to be Vector3::UNIT_Y of the parent node (tabletop mode)
+         * 
+         * otherwise the yaw axis can change freely
+         */
+        void setFixedYaw(bool fixed)
+        {
+            mYawSpace = fixed ? Ogre::Node::TS_PARENT : Ogre::Node::TS_LOCAL;
+        }
+
+        void setPivotOffset(const Ogre::Vector3& offset);
     protected:
         Ogre::Real getDistToTarget();
-
+        Ogre::Node::TransformSpace mYawSpace;
         Ogre::SceneNode* mCamera;
         CameraStyle mStyle;
         Ogre::SceneNode* mTarget;
@@ -161,7 +172,7 @@ namespace OgreBites
         bool mFastMove;
         Ogre::Vector3 mOffset;
     };
+    /** @} */
+    /** @} */
 }
-/** @} */
-/** @} */
 #endif

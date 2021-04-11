@@ -31,9 +31,12 @@ THE SOFTWARE
 #include "OgreResource.h"
 #include "OgreCommon.h"
 #include "OgreSharedPtr.h"
+#include "OgreColourValue.h"
 
 namespace Ogre
 {
+    class BillboardSet;
+
     /** \addtogroup Optional
     *  @{
     */
@@ -121,10 +124,6 @@ namespace Ogre
 
         /// Source of the font (either an image name or a truetype font)
         String mSource;
-
-        /** Add a gap between letters vertically and horizonally
-            prevents nasty artifacts caused by fonts atypically wide or tall characters. */
-        uint mCharacterSpacer;
 
         /// Size of the truetype font, in points
         Real mTtfSize;
@@ -215,19 +214,11 @@ namespace Ogre
         */
         const String& getSource(void) const;
 
-        /** Sets the spacing to allocate for font characters to overlap each other.
-        @param charSpacer The size of the character spacer, in points.  Increasing it
-            allows for more stretched-out fonts; decreasing it reduces memory and processing
-            time.  The default is "5".
-        */
-        void setCharacterSpacer(uint charSpacer);
+        /// @deprecated obsolete
+        OGRE_DEPRECATED void setCharacterSpacer(uint charSpacer) {}
  
-        /** Gets the spacing to allocate for font characters to overlap each other.
-        @remarks Returns the size of the character spacer, in points.  A higher value
-            allows for more stretched-out fonts.  A low value reduces memory and processing
-            time.  The default is "5".
-        */
-        uint getCharacterSpacer(void) const;
+        /// @deprecated obsolete
+        OGRE_DEPRECATED uint getCharacterSpacer(void) const { return 1; }
 
         /** Sets the size of a truetype font (only required for FT_TRUETYPE). 
         @param ttfSize The size of the font in points. Note that the
@@ -305,10 +296,7 @@ namespace Ogre
             }
             else
             {
-                mCodePointMap.insert(
-                    CodePointMap::value_type(id, 
-                        GlyphInfo(id, UVRect(u1, v1, u2, v2), 
-                            textureAspect * (u2 - u1)  / (v2 - v1))));
+                mCodePointMap.emplace(id, GlyphInfo(id, UVRect(u1, v1, u2, v2), textureAspect * (u2 - u1) / (v2 - v1)));
             }
 
         }
@@ -378,14 +366,18 @@ namespace Ogre
         {
             return mMaterial;
         }
-        /** Gets the material generated for this font, as a weak reference. 
-        @remarks
-            This will only be valid after the Font has been loaded. 
-        */
-        inline const MaterialPtr& getMaterial()
-        {
-            return mMaterial;
-        }
+
+        /**
+         * Write a text into a BillboardSet for positioning in Space
+         *
+         * Text is laid out in the x-y plane, running into x+ and using y+ as up
+         * @param bbs the target BillboardSet
+         * @param text text to write
+         * @param height character height in world units
+         * @param colour text colour
+         */
+        void putText(BillboardSet* bbs, const String& text, float height, const ColourValue& colour = ColourValue::White);
+
         /** Sets whether or not the colour of this font is antialiased as it is generated
             from a true type font.
         @remarks
@@ -414,6 +406,13 @@ namespace Ogre
             when the Texture that this font creates needs to (re)load.
         */
         void loadResource(Resource* resource);
+
+        /** Manually set the material used for this font.
+        @remarks
+            This should only be used when the font is being loaded from a
+            ManualResourceLoader.
+        */
+        void _setMaterial(const MaterialPtr& mat);
     };
 
     typedef SharedPtr<Font> FontPtr;

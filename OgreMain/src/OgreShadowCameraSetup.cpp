@@ -50,9 +50,9 @@ namespace Ogre
         texCam->setCustomViewMatrix(false);
         texCam->setCustomProjectionMatrix(false);
         texCam->setNearClipDistance(light->_deriveShadowNearClipDistance(cam));
-        texCam->setFarClipDistance(light->_deriveShadowFarClipDistance(cam));
+        texCam->setFarClipDistance(light->_deriveShadowFarClipDistance());
 
-        // get the shadow frustum's far distance
+        // get the shadow far distance
         Real shadowDist = light->getShadowFarDistance();
         if (!shadowDist)
         {
@@ -64,6 +64,9 @@ namespace Ogre
         // Directional lights 
         if (light->getType() == Light::LT_DIRECTIONAL)
         {
+            // now we need the clip distance
+            if(auto farClip = texCam->getFarClipDistance())
+                shadowDist = farClip;
             // set up the shadow texture
             // Set ortho projection
             texCam->setProjectionType(PT_ORTHOGRAPHIC);
@@ -103,24 +106,17 @@ namespace Ogre
                 // Use camera up
                 up = Vector3::UNIT_Z;
              }
-             // cross twice to rederive, only direction is unaltered
-             Vector3 left = dir.crossProduct(up);
-             left.normalise();
-             up = dir.crossProduct(left);
-             up.normalise();
-             // Derive quaternion from axes
-             Quaternion q;
-             q.FromAxes(left, up, dir);
+             Matrix3 rot = Math::lookRotation(dir, up);
 
              //convert world space camera position into light space
-             Vector3 lightSpacePos = q.Inverse() * pos;
+             Vector3 lightSpacePos = rot.transpose() * pos;
              
              //snap to nearest texel
              lightSpacePos.x -= std::fmod(lightSpacePos.x, worldTexelSize);
              lightSpacePos.y -= std::fmod(lightSpacePos.y, worldTexelSize);
 
              //convert back to world space
-             pos = q * lightSpacePos;
+             pos = rot * lightSpacePos;
             
         }
         // Spotlight
@@ -164,7 +160,7 @@ namespace Ogre
         }
 
         // Finally set position
-        texCam->setPosition(pos);
+        texCam->getParentSceneNode()->setPosition(pos);
 
         // Calculate orientation based on direction calculated above
         /*
@@ -189,15 +185,7 @@ namespace Ogre
             // Use camera up
             up = Vector3::UNIT_Z;
         }
-        // cross twice to rederive, only direction is unaltered
-        Vector3 left = dir.crossProduct(up);
-        left.normalise();
-        up = dir.crossProduct(left);
-        up.normalise();
-        // Derive quaternion from axes
-        Quaternion q;
-        q.FromAxes(left, up, dir);
-        texCam->setOrientation(q);
+        texCam->getParentNode()->setOrientation(Math::lookRotation(dir, up));
     }
 
 

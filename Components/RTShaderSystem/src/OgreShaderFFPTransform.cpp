@@ -51,6 +51,7 @@ int FFPTransform::getExecutionOrder() const
 bool FFPTransform::preAddToRenderState(const RenderState* renderState, Pass* srcPass, Pass* dstPass)
 {
     mSetPointSize = srcPass->getPointSize() != 1.0f || srcPass->isPointAttenuationEnabled();
+    mDoLightCalculations = srcPass->getLightingEnabled();
     return true;
 }
 
@@ -62,48 +63,57 @@ bool FFPTransform::createCpuSubPrograms(ProgramSet* programSet)
     Function* vsEntry = vsProgram->getEntryPointFunction();
     
     // Resolve World View Projection Matrix.
-    UniformParameterPtr wvpMatrix = vsProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_WORLDVIEWPROJ_MATRIX, 0);
-        
+    UniformParameterPtr wvpMatrix = vsProgram->resolveParameter(GpuProgramParameters::ACT_WORLDVIEWPROJ_MATRIX);
+
     // Resolve input position parameter.
-    ParameterPtr positionIn = vsEntry->resolveInputParameter(Parameter::SPS_POSITION, 0, Parameter::SPC_POSITION_OBJECT_SPACE, GCT_FLOAT4); 
+    ParameterPtr positionIn = vsEntry->resolveInputParameter(Parameter::SPC_POSITION_OBJECT_SPACE);
     
     // Resolve output position parameter.
-    ParameterPtr positionOut = vsEntry->resolveOutputParameter(Parameter::SPS_POSITION, 0, Parameter::SPC_POSITION_PROJECTIVE_SPACE, GCT_FLOAT4);
-
-    if (!wvpMatrix || !positionIn || !positionOut)
-    {
-        OGRE_EXCEPT( Exception::ERR_INTERNAL_ERROR, 
-                "Not all parameters could be constructed for the sub-render state.",
-                "FFPTransform::createCpuSubPrograms" );
-    }
+    ParameterPtr positionOut = vsEntry->resolveOutputParameter(Parameter::SPC_POSITION_PROJECTIVE_SPACE);
     //! [param_resolve]
+
     // Add dependency.
     vsProgram->addDependency(FFP_LIB_TRANSFORM);
 
-    FunctionInvocation* transformFunc = OGRE_NEW FunctionInvocation(FFP_FUNC_TRANSFORM,  FFP_VS_TRANSFORM);
+    bool isHLSL = ShaderGenerator::getSingleton().getTargetLanguage() == "hlsl";
 
-    transformFunc->pushOperand(wvpMatrix, Operand::OPS_IN);
-    transformFunc->pushOperand(positionIn, Operand::OPS_IN);
-    transformFunc->pushOperand(positionOut, Operand::OPS_OUT);
+    // This requires GLES3.0
+    if (ShaderGenerator::getSingleton().getTargetLanguage() == "glsles" &&
+        !GpuProgramManager::getSingleton().isSyntaxSupported("glsl300es"))
+        mInstanced = false;
 
-    vsEntry->addAtomInstance(transformFunc);
+    auto stage = vsEntry->getStage(FFP_VS_TRANSFORM);
+    if(mInstanced)
+    {
+        if (isHLSL)
+        {
+            // set hlsl shader to use row-major matrices instead of column-major.
+            // it enables the use of auto-bound 3x4 matrices in generated hlsl shader.
+            vsProgram->setUseColumnMajorMatrices(false);
+        }
 
-    if(!mSetPointSize || ShaderGenerator::getSingleton().getTargetLanguage() == "hlsl") // not supported with DX11
+        auto wMatrix = vsEntry->resolveInputParameter(mTexCoordIndex, GCT_MATRIX_3X4);
+        stage.callFunction(FFP_FUNC_TRANSFORM, wMatrix, positionIn, Out(positionIn).xyz());
+
+        if(mDoLightCalculations)
+        {
+            auto vsInNormal = vsEntry->resolveInputParameter(Parameter::SPC_NORMAL_OBJECT_SPACE);
+            stage.callFunction(FFP_FUNC_TRANSFORM, wMatrix, vsInNormal, vsInNormal);
+        }
+        // we can end here because the world matrix will be identity with instanced rendering
+        // so the code below will work as indended
+    }
+    stage.callFunction(FFP_FUNC_TRANSFORM, wvpMatrix, positionIn, positionOut);
+
+    if(!mSetPointSize || isHLSL) // not supported with DX11
         return true;
 
-    UniformParameterPtr pointParams = vsProgram->resolveAutoParameterReal(GpuProgramParameters::ACT_POINT_PARAMS, 0);
-    ParameterPtr pointSize = vsEntry->resolveOutputParameter(
-        Parameter::SPS_TEXTURE_COORDINATES, -1, Parameter::SPC_POINTSPRITE_SIZE, GCT_FLOAT1); // abuse of texture semantic
+    UniformParameterPtr pointParams = vsProgram->resolveParameter(GpuProgramParameters::ACT_POINT_PARAMS);
+    ParameterPtr pointSize = vsEntry->resolveOutputParameter(Parameter::SPC_POINTSPRITE_SIZE);
 
-    transformFunc = OGRE_NEW FunctionInvocation("FFP_DerivePointSize", FFP_VS_TRANSFORM);
-
-    transformFunc->pushOperand(pointParams, Operand::OPS_IN);
     // using eye space depth only instead of the eye real distance
     // its faster to obtain, so lets call it close enough..
-    transformFunc->pushOperand(positionOut, Operand::OPS_IN, Operand::OPM_W);
-    transformFunc->pushOperand(pointSize, Operand::OPS_OUT);
-
-    vsEntry->addAtomInstance(transformFunc);
+    stage.callFunction("FFP_DerivePointSize", pointParams, In(positionOut).w(), pointSize);
 
     return true;
 }
@@ -114,6 +124,8 @@ void FFPTransform::copyFrom(const SubRenderState& rhs)
 {
     const FFPTransform& rhsTransform = static_cast<const FFPTransform&>(rhs);
     mSetPointSize = rhsTransform.mSetPointSize;
+    mInstanced = rhsTransform.mInstanced;
+    mTexCoordIndex = rhsTransform.mTexCoordIndex;
 }
 
 //-----------------------------------------------------------------------
@@ -128,21 +140,33 @@ SubRenderState* FFPTransformFactory::createInstance(ScriptCompiler* compiler,
 {
     if (prop->name == "transform_stage")
     {
-        if(prop->values.size() == 1)
+        if(prop->values.size() > 0)
         {
+            bool hasError = false;
             String modelType;
+            int texCoordSlot = 1;
 
-            if(false == SGScriptTranslator::getString(prop->values.front(), &modelType))
+            auto it = prop->values.begin();
+
+            if(!SGScriptTranslator::getString(*it, &modelType))
+            {
+                hasError = true;
+            }
+
+            if(++it != prop->values.end() && !SGScriptTranslator::getInt(*++it, &texCoordSlot))
+                hasError = true;
+
+            if(hasError)
             {
                 compiler->addError(ScriptCompiler::CE_INVALIDPARAMETERS, prop->file, prop->line);
                 return NULL;
             }
 
-            if (modelType == "ffp")
-            {
-                return createOrRetrieveInstance(translator);
-            }
-        }       
+            auto ret = static_cast<FFPTransform*>(createOrRetrieveInstance(translator));
+            ret->setInstancingParams(modelType == "instanced", texCoordSlot);
+
+            return ret;
+        }
     }
 
     return NULL;

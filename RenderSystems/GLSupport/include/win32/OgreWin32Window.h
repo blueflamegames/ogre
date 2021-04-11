@@ -30,10 +30,10 @@ THE SOFTWARE.
 #define __Win32Window_H__
 
 #include "OgreWin32Prerequisites.h"
-#include "OgreRenderWindow.h"
+#include "OgreGLWindow.h"
 
 namespace Ogre {
-    class _OgreGLExport Win32Window : public RenderWindow
+    class _OgreGLExport Win32Window : public GLWindow
     {
     public:
         Win32Window(Win32GLSupport &glsupport);
@@ -45,21 +45,11 @@ namespace Ogre {
         void destroy(void);
         bool isActive(void) const;
         bool isVisible() const;
-        bool isHidden() const { return mHidden; }
         void setHidden(bool hidden);
         void setVSyncEnabled(bool vsync);
-        bool isVSyncEnabled() const;
-        void setVSyncInterval(unsigned int interval);
-        unsigned int getVSyncInterval() const;
-        bool isClosed(void) const;
         void reposition(int left, int top);
         void resize(unsigned int width, unsigned int height);
         void swapBuffers();
-
-        /** Overridden - see RenderTarget. */
-        virtual void copyContentsToMemory(const Box& src, const PixelBox &dst, FrameBuffer buffer);
-
-        bool requiresTextureFlipping() const { return false; }
 
         HWND getWindowHandle() const { return mHWnd; }
         HDC getHDC() const { return mHDC; }
@@ -89,17 +79,10 @@ namespace Ogre {
         HWND    mHWnd;                  // Win32 Window handle
         HDC     mHDC;
         HGLRC   mGlrc;
-        bool    mIsExternal;
         char*   mDeviceName;
-        bool    mIsExternalGLControl;
         bool    mOwnsGLContext;
         bool    mSizing;
-        bool    mClosed;
-        bool    mHidden;
-        bool    mVSync;
-        unsigned int mVSyncInterval;
         int     mDisplayFrequency;      // fullscreen only, to restore display
-        Win32Context *mContext;
         DWORD   mWindowedWinStyle;      // Windowed mode window style flags.
         DWORD   mFullscreenWinStyle;    // Fullscreen mode window style flags.
     };

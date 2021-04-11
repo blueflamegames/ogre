@@ -47,13 +47,11 @@ namespace Ogre
     GpuLogicalBufferStructPtr GpuProgram::mBoolLogicalToPhysical;
 
     //-----------------------------------------------------------------------------
-    GpuProgram::GpuProgram(ResourceManager* creator, const String& name, ResourceHandle handle,
-        const String& group, bool isManual, ManualResourceLoader* loader) 
-        :Resource(creator, name, handle, group, isManual, loader),
-        mType(GPT_VERTEX_PROGRAM), mLoadFromFile(true), mSkeletalAnimation(false),
-        mMorphAnimation(false), mPoseAnimation(0),
-        mVertexTextureFetch(false), mNeedsAdjacencyInfo(false),
-        mCompileError(false), mLoadedManualNamedConstants(false)
+    GpuProgram::GpuProgram(ResourceManager* creator, const String& name, ResourceHandle handle, const String& group,
+                           bool isManual, ManualResourceLoader* loader)
+        : Resource(creator, name, handle, group, isManual, loader), mType(GPT_VERTEX_PROGRAM), mLoadFromFile(true),
+          mSkeletalAnimation(false), mMorphAnimation(false), mVertexTextureFetch(false), mNeedsAdjacencyInfo(false),
+          mCompileError(false), mPoseAnimation(0), mLoadedManualNamedConstants(false)
     {
         createParameterMappingStructures();
     }
@@ -93,14 +91,11 @@ namespace Ogre
 
     size_t GpuProgram::calculateSize(void) const
     {
-        size_t memSize = 0;
-        memSize += sizeof(bool) * 7;
+        size_t memSize = sizeof(*this);
         memSize += mManualNamedConstantsFile.size() * sizeof(char);
         memSize += mFilename.size() * sizeof(char);
         memSize += mSource.size() * sizeof(char);
         memSize += mSyntaxCode.size() * sizeof(char);
-        memSize += sizeof(GpuProgramType);
-        memSize += sizeof(ushort);
 
         size_t paramsSize = 0;
         if(mDefaultParams)
@@ -117,49 +112,75 @@ namespace Ogre
         return memSize + paramsSize;
     }
     //-----------------------------------------------------------------------------
+    void GpuProgram::prepareImpl()
+    {
+        if (!mLoadFromFile)
+            return;
+
+        mSource = ResourceGroupManager::getSingleton().openResource(mFilename, mGroup, this)->getAsString();
+    }
+
+    void GpuProgram::safePrepare()
+    {
+        try
+        {
+            prepare();
+        }
+        catch (const RuntimeAssertionException&)
+        {
+            throw;
+        }
+        catch (const Exception& e)
+        {
+            // will already have been logged
+            LogManager::getSingleton().stream(LML_CRITICAL)
+                << "Program '" << mName << "' is not supported: " << e.getDescription();
+
+            mCompileError = true;
+        }
+    }
+
     void GpuProgram::loadImpl(void)
     {
-        if (mLoadFromFile)
-        {
-            // find & load source code
-            DataStreamPtr stream = 
-                ResourceGroupManager::getSingleton().openResource(
-                    mFilename, mGroup, this);
-            mSource = stream->getAsString();
-        }
+        if(mCompileError)
+            return;
 
         // Call polymorphic load
         try 
         {
             loadFromSource();
-
-            if (mDefaultParams)
-            {
-                // Keep a reference to old ones to copy
-                GpuProgramParametersSharedPtr savedParams = mDefaultParams;
-                // reset params to stop them being referenced in the next create
-                mDefaultParams.reset();
-
-                // Create new params
-                mDefaultParams = createParameters();
-
-                // Copy old (matching) values across
-                // Don't use copyConstantsFrom since program may be different
-                mDefaultParams->copyMatchingNamedConstantsFrom(*savedParams.get());
-
-            }
         }
-        catch (const Exception&)
+        catch (const RuntimeAssertionException&)
+        {
+            throw;
+        }
+        catch (const Exception& e)
         {
             // will already have been logged
-            LogManager::getSingleton().stream()
-                << "Gpu program " << mName << " encountered an error "
-                << "during loading and is thus not supported.";
+            LogManager::getSingleton().stream(LML_CRITICAL)
+                << "Program '" << mName << "' is not supported: " << e.getDescription();
 
             mCompileError = true;
         }
-
     }
+    void GpuProgram::postLoadImpl()
+    {
+        if (!mDefaultParams || mCompileError)
+            return;
+
+        // Keep a reference to old ones to copy
+        GpuProgramParametersSharedPtr savedParams = mDefaultParams;
+        // reset params to stop them being referenced in the next create
+        mDefaultParams.reset();
+
+        // Create new params
+        mDefaultParams = createParameters();
+
+        // Copy old (matching) values across
+        // Don't use copyConstantsFrom since program may be different
+        mDefaultParams->copyMatchingNamedConstantsFrom(*savedParams.get());
+    }
+
     //-----------------------------------------------------------------------------
     bool GpuProgram::isRequiredCapabilitiesSupported(void) const
     {
@@ -167,9 +188,7 @@ namespace Ogre
             Root::getSingleton().getRenderSystem()->getCapabilities();
 
         // Basic support check
-        if ((getType() == GPT_VERTEX_PROGRAM && !caps->hasCapability(RSC_VERTEX_PROGRAM)) ||
-            (getType() == GPT_GEOMETRY_PROGRAM && !caps->hasCapability(RSC_GEOMETRY_PROGRAM)) ||
-            (getType() == GPT_FRAGMENT_PROGRAM && !caps->hasCapability(RSC_FRAGMENT_PROGRAM)) ||
+        if ((getType() == GPT_GEOMETRY_PROGRAM && !caps->hasCapability(RSC_GEOMETRY_PROGRAM)) ||
             (getType() == GPT_DOMAIN_PROGRAM && !caps->hasCapability(RSC_TESSELLATION_DOMAIN_PROGRAM)) ||
             (getType() == GPT_HULL_PROGRAM && !caps->hasCapability(RSC_TESSELLATION_HULL_PROGRAM)) ||
             (getType() == GPT_COMPUTE_PROGRAM && !caps->hasCapability(RSC_COMPUTE_PROGRAM)))
@@ -250,11 +269,11 @@ namespace Ogre
                     GpuLogicalIndexUse(def.physicalIndex, def.arraySize * def.elementSize, def.variability));
                 if (def.isFloat())
                 {
-                    mFloatLogicalToPhysical->map.insert(val);
+                    mFloatLogicalToPhysical->map.emplace(val);
                 }
                 else
                 {
-                    mIntLogicalToPhysical->map.insert(val);
+                    mIntLogicalToPhysical->map.emplace(val);
                 }
             }
         }
@@ -307,7 +326,7 @@ namespace Ogre
         return ret;
     }
     //-----------------------------------------------------------------------------
-    GpuProgramParametersSharedPtr GpuProgram::getDefaultParameters(void)
+    const GpuProgramParametersPtr& GpuProgram::getDefaultParameters(void)
     {
         if (!mDefaultParams)
         {
@@ -391,30 +410,7 @@ namespace Ogre
     String GpuProgram::CmdType::doGet(const void* target) const
     {
         const GpuProgram* t = static_cast<const GpuProgram*>(target);
-        if (t->getType() == GPT_VERTEX_PROGRAM)
-        {
-            return "vertex_program";
-        }
-        else if (t->getType() == GPT_GEOMETRY_PROGRAM)
-        {
-            return "geometry_program";
-        }
-        else if (t->getType() == GPT_DOMAIN_PROGRAM)
-        {
-            return "domain_program";
-        }
-        else if (t->getType() == GPT_HULL_PROGRAM)
-        {
-            return "hull_program";
-        }
-        else if (t->getType() == GPT_COMPUTE_PROGRAM)
-        {
-            return "compute_program";
-        }
-        else
-        {
-            return "fragment_program";
-        }
+        return GpuProgram::getProgramTypeName(t->getType()) + "_program";
     }
     void GpuProgram::CmdType::doSet(void* target, const String& val)
     {
@@ -524,6 +520,7 @@ namespace Ogre
         t->mNeedsAdjacencyInfo = StringConverter::parseBool(val);
     }
     //-----------------------------------------------------------------------
+    OGRE_IGNORE_DEPRECATED_BEGIN
     String GpuProgram::CmdComputeGroupDims::doGet(const void* target) const
     {
         const GpuProgram* t = static_cast<const GpuProgram*>(target);
@@ -534,5 +531,6 @@ namespace Ogre
         GpuProgram* t = static_cast<GpuProgram*>(target);
         t->setComputeGroupDimensions(StringConverter::parseVector3(val));
     }
+    OGRE_IGNORE_DEPRECATED_END
 }
 

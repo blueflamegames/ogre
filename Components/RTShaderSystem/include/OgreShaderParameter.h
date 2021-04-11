@@ -28,7 +28,7 @@ THE SOFTWARE.
 #define _ShaderParameter_
 
 #include "OgreShaderPrerequisites.h"
-#include "OgreVector2.h"
+#include "OgreVector.h"
 #include "OgreMatrix4.h"
 #include "OgreGpuProgramParams.h"
 
@@ -70,7 +70,11 @@ public:
         SPS_TANGENT = 9
     };
 
-    // Shader parameter content.
+    /** Shader parameter content
+     * 
+     * used to resolve Parameters across different SubRenderState instances
+     * Think of it as Semantic extended to the actual parameter content.
+     */ 
     enum Content
     {
         /// Unknown content
@@ -362,6 +366,10 @@ public:
     /** Sets the number of elements in the parameter (for arrays). */
     void setSize(size_t size) { mSize = size; }
 
+    /// track whether this was used
+    void setUsed(bool used) { mUsed = used; }
+    bool isUsed() { return mUsed; }
+
 // Attributes.
 protected:
     // Name of this parameter.
@@ -381,6 +389,7 @@ protected:
     // Number of elements in the parameter (for arrays)
     size_t mSize;
     
+    bool mUsed;
 };
 
 typedef ShaderParameterList::iterator           ShaderParameterIterator;
@@ -523,6 +532,20 @@ public:
         }
     }
 
+    void setGpuParameter(const Matrix3& val)
+    {
+        if (mParamsPtr == NULL) return;
+
+        if(mElementSize == 9) // check if tight packing is supported
+        {
+            mParamsPtr->_writeRawConstant(mPhysicalIndex, val, 9);
+        }
+        else
+        {
+            mParamsPtr->_writeRawConstant(mPhysicalIndex, Matrix4(val), mElementSize);
+        }
+    }
+
     /** Update the GPU parameter with the given value. */   
     void setGpuParameter(const Matrix4& val)  
     { 
@@ -559,6 +582,16 @@ public:
         }
     }
 
+    /// light index or array size
+    void updateExtraInfo(size_t data)
+    {
+        if (!mParamsPtr)
+            return;
+
+        mParamsPtr->_setRawAutoConstant(mPhysicalIndex, mAutoConstantType, data, mVariability,
+                                        mElementSize);
+    }
+
 protected:
     // Is it auto constant real based parameter.
     bool mIsAutoConstantReal;
@@ -578,6 +611,8 @@ protected:
     GpuProgramParameters* mParamsPtr;
     // The physical index of this parameter in the GPU program.
     size_t mPhysicalIndex;
+    // The size of this parameter in the GPU program
+    size_t mElementSize;
 };
 
 typedef std::vector<UniformParameterPtr>       UniformParameterList;
@@ -627,7 +662,7 @@ class _OgreRTSSExport ParameterFactory
     // Interface.
 public:
 
-    static ParameterPtr createInPosition(int index);    
+    static ParameterPtr createInPosition(int index, Parameter::Content content = Parameter::SPC_POSITION_OBJECT_SPACE);
     static ParameterPtr createOutPosition(int index);
 
     static ParameterPtr createInNormal(int index);
@@ -643,7 +678,9 @@ public:
 
     static ParameterPtr createInTexcoord(GpuConstantType type, int index, Parameter::Content content);
     static ParameterPtr createOutTexcoord(GpuConstantType type, int index, Parameter::Content content);
+    /// @deprecated use createInTexcoord
     static ParameterPtr createInTexcoord1(int index, Parameter::Content content);
+    /// @deprecated use createOutTexcoord
     static ParameterPtr createOutTexcoord1(int index, Parameter::Content content);
     static ParameterPtr createInTexcoord2(int index, Parameter::Content content);
     static ParameterPtr createOutTexcoord2(int index, Parameter::Content content);
@@ -651,11 +688,6 @@ public:
     static ParameterPtr createOutTexcoord3(int index, Parameter::Content content);
     static ParameterPtr createInTexcoord4(int index, Parameter::Content content);           
     static ParameterPtr createOutTexcoord4(int index, Parameter::Content content);
-
-    OGRE_DEPRECATED static ParameterPtr createConstParamVector2(Vector2 val) { return createConstParam(val); }
-    OGRE_DEPRECATED static ParameterPtr createConstParamVector3(Vector3 val) { return createConstParam(val); }
-    OGRE_DEPRECATED static ParameterPtr createConstParamVector4(Vector4 val) { return createConstParam(val); }
-    OGRE_DEPRECATED static ParameterPtr createConstParamFloat(float val) { return createConstParam(val); }
 
     static ParameterPtr createConstParam(const Vector2& val);
     static ParameterPtr createConstParam(const Vector3& val);

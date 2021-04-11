@@ -94,15 +94,7 @@ bool ShaderExReflectionMap::preAddToRenderState(const RenderState* renderState, 
     // Create the reflection texture unit.
     textureUnit = dstPass->createTextureUnitState();
 
-    if (mReflectionMapType == TEX_TYPE_2D)
-    {
-        textureUnit->setTextureName(mReflectionMapTextureName); 
-    }
-    else
-    {
-        textureUnit->setCubicTextureName(mReflectionMapTextureName, true);  
-    }
-        
+    textureUnit->setTextureName(mReflectionMapTextureName, mReflectionMapType);
     mReflectionMapSamplerIndex = dstPass->getNumTextureUnitStates() - 1;
 
     return true;
@@ -119,81 +111,41 @@ bool ShaderExReflectionMap::resolveParameters(ProgramSet* programSet)
     // Resolve vs input mask texture coordinates.
     // NOTE: We use the first texture coordinate hard coded here
     // You may want to parametrize this as well - just remember to add it to hash and copy methods. 
-    mVSInMaskTexcoord = vsMain->resolveInputParameter(Parameter::SPS_TEXTURE_COORDINATES, 0, Parameter::SPC_TEXTURE_COORDINATE0, GCT_FLOAT2);
-    if (mVSInMaskTexcoord.get() == 0)
-        return false;
-
+    mVSInMaskTexcoord = vsMain->resolveInputParameter(Parameter::SPC_TEXTURE_COORDINATE0, GCT_FLOAT2);
     // Resolve vs output mask texture coordinates.
-    mVSOutMaskTexcoord = vsMain->resolveOutputParameter(Parameter::SPS_TEXTURE_COORDINATES, -1, mVSInMaskTexcoord->getContent(), GCT_FLOAT2);
-    if (mVSOutMaskTexcoord.get() == 0)
-        return false;
-
+    mVSOutMaskTexcoord = vsMain->resolveOutputParameter(mVSInMaskTexcoord->getContent(), GCT_FLOAT2);
     // Resolve ps input mask texture coordinates.
-    mPSInMaskTexcoord = psMain->resolveInputParameter(Parameter::SPS_TEXTURE_COORDINATES, 
-        mVSOutMaskTexcoord->getIndex(), 
-        mVSOutMaskTexcoord->getContent(),
-        GCT_FLOAT2);
+    mPSInMaskTexcoord = psMain->resolveInputParameter(mVSOutMaskTexcoord);
 
     // Resolve vs output reflection texture coordinates.
-    mVSOutReflectionTexcoord = vsMain->resolveOutputParameter(Parameter::SPS_TEXTURE_COORDINATES, -1, 
-        Parameter::SPC_UNKNOWN,
-        mReflectionMapType == TEX_TYPE_2D ? GCT_FLOAT2 : GCT_FLOAT3);
-    if (mVSOutReflectionTexcoord.get() == 0)
-        return false;
+    mVSOutReflectionTexcoord = vsMain->resolveOutputParameter(
+        Parameter::SPC_UNKNOWN, mReflectionMapType == TEX_TYPE_2D ? GCT_FLOAT2 : GCT_FLOAT3);
 
     // Resolve ps input reflection texture coordinates.
-    mPSInReflectionTexcoord= psMain->resolveInputParameter(Parameter::SPS_TEXTURE_COORDINATES, 
-        mVSOutReflectionTexcoord->getIndex(), 
-        mVSOutReflectionTexcoord->getContent(),
-        mVSOutReflectionTexcoord->getType());
+    mPSInReflectionTexcoord= psMain->resolveInputParameter(mVSOutReflectionTexcoord);
 
 
     // Resolve world matrix.    
-    mWorldMatrix = vsProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_WORLD_MATRIX, 0);
-    if (mWorldMatrix.get() == NULL)
-        return false;   
-
+    mWorldMatrix = vsProgram->resolveParameter(GpuProgramParameters::ACT_WORLD_MATRIX);
     // Resolve world inverse transpose matrix.  
-    mWorldITMatrix = vsProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_INVERSE_TRANSPOSE_WORLD_MATRIX, 0);
-    if (mWorldITMatrix.get() == NULL)
-        return false;   
-
-
+    mWorldITMatrix = vsProgram->resolveParameter(GpuProgramParameters::ACT_INVERSE_TRANSPOSE_WORLD_MATRIX);
     // Resolve view matrix.
-    mViewMatrix = vsProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_VIEW_MATRIX, 0);
-    if (mViewMatrix.get() == NULL)
-        return false;   
-
+    mViewMatrix = vsProgram->resolveParameter(GpuProgramParameters::ACT_VIEW_MATRIX);
     // Resolve vertex position.
-    mVSInputPos = vsMain->resolveInputParameter(Parameter::SPS_POSITION, 0, Parameter::SPC_POSITION_OBJECT_SPACE, GCT_FLOAT4);
-    if (mVSInputPos.get() == NULL)
-        return false;       
-
+    mVSInputPos = vsMain->resolveInputParameter(Parameter::SPC_POSITION_OBJECT_SPACE);
     // Resolve vertex normal.
-    mVSInputNormal = vsMain->resolveInputParameter(Parameter::SPS_NORMAL, 0, Parameter::SPC_NORMAL_OBJECT_SPACE, GCT_FLOAT3);
-    if (mVSInputNormal.get() == NULL)
-        return false;       
-
+    mVSInputNormal = vsMain->resolveInputParameter(Parameter::SPC_NORMAL_OBJECT_SPACE);
     // Resolve mask texture sampler parameter.      
-    mMaskMapSampler = psProgram->resolveParameter(GCT_SAMPLER2D, mMaskMapSamplerIndex, (uint16)GPV_GLOBAL, "mask_sampler");
-    if (mMaskMapSampler.get() == NULL)
-        return false;
+    mMaskMapSampler = psProgram->resolveParameter(GCT_SAMPLER2D, "mask_sampler", mMaskMapSamplerIndex);
 
     // Resolve reflection texture sampler parameter.        
     mReflectionMapSampler = psProgram->resolveParameter(mReflectionMapType == TEX_TYPE_2D ? GCT_SAMPLER2D : GCT_SAMPLERCUBE, 
-        mReflectionMapSamplerIndex, (uint16)GPV_GLOBAL, "reflection_texture");
-    if (mReflectionMapSampler.get() == NULL)
-        return false;
+        "reflection_texture", mReflectionMapSamplerIndex);
 
     // Resolve reflection power parameter.      
-    mReflectionPower = psProgram->resolveParameter(GCT_FLOAT1, -1, (uint16)GPV_GLOBAL, "reflection_power");
-    if (mReflectionPower.get() == NULL)
-        return false;
-
+    mReflectionPower = psProgram->resolveParameter(GCT_FLOAT1, "reflection_power");
     // Resolve ps output diffuse colour.
-    mPSOutDiffuse = psMain->resolveOutputParameter(Parameter::SPS_COLOR, 0, Parameter::SPC_COLOR_DIFFUSE, GCT_FLOAT4);
-    if (mPSOutDiffuse.get() == NULL)
-        return false;
+    mPSOutDiffuse = psMain->resolveOutputParameter(Parameter::SPC_COLOR_DIFFUSE);
 
     return true;
 }
@@ -225,45 +177,35 @@ bool ShaderExReflectionMap::addFunctionInvocations(ProgramSet* programSet)
     
 
     // Add vertex shader invocations.
-    if (false == addVSInvocations(vsMain, FFP_VS_TEXTURING + 1))
+    if (false == addVSInvocations(vsMain->getStage(FFP_VS_TEXTURING + 1)))
         return false;
 
 
     // Add pixel shader invocations.
-    if (false == addPSInvocations(psMain, FFP_PS_TEXTURING + 1))
+    if (false == addPSInvocations(psMain->getStage(FFP_PS_TEXTURING + 1)))
         return false;
     
     return true;
 }
 
 //-----------------------------------------------------------------------
-bool ShaderExReflectionMap::addVSInvocations( Function* vsMain, const int groupOrder )
+bool ShaderExReflectionMap::addVSInvocations( const FunctionStageRef& stage )
 {
-    FunctionInvocation* funcInvocation = NULL;
-
     // Output mask texture coordinates.
-    vsMain->addAtomAssign(mVSOutMaskTexcoord, mVSInMaskTexcoord, groupOrder);
+    stage.assign(mVSInMaskTexcoord, mVSOutMaskTexcoord);
+
 
     // Output reflection texture coordinates.
     if (mReflectionMapType == TEX_TYPE_2D)
     {
-        funcInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_GENERATE_TEXCOORD_ENV_SPHERE,  groupOrder);
-        funcInvocation->pushOperand(mWorldITMatrix, Operand::OPS_IN);
-        funcInvocation->pushOperand(mViewMatrix, Operand::OPS_IN);  
-        funcInvocation->pushOperand(mVSInputNormal, Operand::OPS_IN);   
-        funcInvocation->pushOperand(mVSOutReflectionTexcoord, Operand::OPS_OUT);
-        vsMain->addAtomInstance(funcInvocation);
+        stage.callFunction(FFP_FUNC_GENERATE_TEXCOORD_ENV_SPHERE,
+                           {In(mWorldITMatrix), In(mViewMatrix), In(mVSInputNormal), Out(mVSOutReflectionTexcoord)});
     }
     else
     {
-        funcInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_GENERATE_TEXCOORD_ENV_REFLECT, groupOrder);
-        funcInvocation->pushOperand(mWorldMatrix, Operand::OPS_IN);
-        funcInvocation->pushOperand(mWorldITMatrix, Operand::OPS_IN);
-        funcInvocation->pushOperand(mViewMatrix, Operand::OPS_IN);                  
-        funcInvocation->pushOperand(mVSInputNormal, Operand::OPS_IN);   
-        funcInvocation->pushOperand(mVSInputPos, Operand::OPS_IN);              
-        funcInvocation->pushOperand(mVSOutReflectionTexcoord, Operand::OPS_OUT);
-        vsMain->addAtomInstance(funcInvocation);
+        stage.callFunction(
+            FFP_FUNC_GENERATE_TEXCOORD_ENV_REFLECT,
+            {In(mWorldMatrix), In(mWorldITMatrix), In(mViewMatrix), In(mVSInputNormal), In(mVSInputPos), Out(mVSOutReflectionTexcoord)});
     }
     
 
@@ -272,21 +214,12 @@ bool ShaderExReflectionMap::addVSInvocations( Function* vsMain, const int groupO
 }
 
 //-----------------------------------------------------------------------
-bool ShaderExReflectionMap::addPSInvocations( Function* psMain, const int groupOrder )
+bool ShaderExReflectionMap::addPSInvocations( const FunctionStageRef& stage )
 {
-    FunctionInvocation* funcInvocation = NULL;
-
-    funcInvocation = OGRE_NEW FunctionInvocation(SGX_FUNC_APPLY_REFLECTION_MAP, groupOrder);
-    funcInvocation->pushOperand(mMaskMapSampler, Operand::OPS_IN);
-    funcInvocation->pushOperand(mPSInMaskTexcoord, Operand::OPS_IN);
-    funcInvocation->pushOperand(mReflectionMapSampler, Operand::OPS_IN);
-    funcInvocation->pushOperand(mPSInReflectionTexcoord, Operand::OPS_IN);  
-    funcInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_IN, Operand::OPM_XYZ);
-    funcInvocation->pushOperand(mReflectionPower, Operand::OPS_IN);
-    funcInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_OUT, Operand::OPM_XYZ);
-    
-    psMain->addAtomInstance(funcInvocation);
-
+    stage.callFunction(SGX_FUNC_APPLY_REFLECTION_MAP,
+                       {In(mMaskMapSampler), In(mPSInMaskTexcoord), In(mReflectionMapSampler),
+                        In(mPSInReflectionTexcoord), In(mPSOutDiffuse).xyz(), In(mReflectionPower),
+                        Out(mPSOutDiffuse).xyz()});
     return true;
 }
 
@@ -310,7 +243,7 @@ void ShaderExReflectionMap::setReflectionPower(const Real reflectionPower)
 }
 
 //-----------------------------------------------------------------------
-void ShaderExReflectionMap::updateGpuProgramsParams(Renderable* rend, Pass* pass, const AutoParamDataSource* source, const LightList* pLightList)
+void ShaderExReflectionMap::updateGpuProgramsParams(Renderable* rend, const Pass* pass, const AutoParamDataSource* source, const LightList* pLightList)
 {
     if (mReflectionPowerChanged)
     {

@@ -32,7 +32,6 @@ THE SOFTWARE.
 #include "OgrePrerequisites.h"
 
 #include "OgreSingleton.h"
-#include "OgreHardwareCounterBuffer.h"
 #include "OgreHardwareIndexBuffer.h"
 #include "OgreHardwareUniformBuffer.h"
 #include "OgreHardwareVertexBuffer.h"
@@ -237,10 +236,10 @@ namespace Ogre {
             update regularly, consider HBU_DYNAMIC_WRITE_ONLY and useShadowBuffer=true.
         @param useShadowBuffer
             If set to @c true, this buffer will be 'shadowed' by one stored in 
-            system memory rather than GPU or AGP memory. You should set this flag if you intend 
+            system memory rather than GPU memory. You should set this flag if you intend
             to read data back from the vertex buffer, because reading data from a buffer
-            in the GPU or AGP memory is very expensive, and is in fact impossible if you
-            specify HBU_WRITE_ONLY for the main buffer. If you use this option, all 
+            in the GPU memory is very expensive, and is in fact impossible if you
+            specify HBU_DETAIL_WRITE_ONLY for the main buffer. If you use this option, all
             reads and writes will be done to the shadow buffer, and the shadow buffer will
             be synchronised with the real buffer at an appropriate time.
         */
@@ -260,10 +259,10 @@ namespace Ogre {
             One or more members of the HardwareBuffer::Usage enumeration.
         @param useShadowBuffer
             If set to @c true, this buffer will be 'shadowed' by one stored in 
-            system memory rather than GPU or AGP memory. You should set this flag if you intend 
+            system memory rather than GPU memory. You should set this flag if you intend
             to read data back from the index buffer, because reading data from a buffer
-            in the GPU or AGP memory is very expensive, and is in fact impossible if you
-            specify HBU_WRITE_ONLY for the main buffer. If you use this option, all 
+            in the GPU memory is very expensive, and is in fact impossible if you
+            specify HBU_DETAIL_WRITE_ONLY for the main buffer. If you use this option, all
             reads and writes will be done to the shadow buffer, and the shadow buffer will
             be synchronised with the real buffer at an appropriate time.
         */
@@ -275,7 +274,7 @@ namespace Ogre {
         @remarks The parameters (such as vertex size etc) are determined later
             and are allocated when needed.
         */
-        virtual RenderToVertexBufferSharedPtr createRenderToVertexBuffer() = 0;
+        virtual RenderToVertexBufferSharedPtr createRenderToVertexBuffer();
 
         /**
          * Create uniform buffer. This type of buffer allows the upload of shader constants once,
@@ -284,7 +283,7 @@ namespace Ogre {
          */
         virtual HardwareUniformBufferSharedPtr createUniformBuffer(size_t sizeBytes, 
                                     HardwareBuffer::Usage usage = HardwareBuffer::HBU_DYNAMIC_WRITE_ONLY_DISCARDABLE, 
-                                    bool useShadowBuffer = false, const String& name = "") = 0;
+                                    bool useShadowBuffer = false, const String& name = "");
 
         /**
          * Create counter buffer.
@@ -292,7 +291,7 @@ namespace Ogre {
          */
         virtual HardwareCounterBufferSharedPtr createCounterBuffer(size_t sizeBytes,
                                                                    HardwareBuffer::Usage usage = HardwareBuffer::HBU_DYNAMIC_WRITE_ONLY_DISCARDABLE,
-                                                                   bool useShadowBuffer = false, const String& name = "") = 0;
+                                                                   bool useShadowBuffer = false, const String& name = "");
 
         /** Creates a new vertex declaration. */
         VertexDeclaration* createVertexDeclaration(void);

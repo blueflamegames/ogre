@@ -87,8 +87,10 @@ namespace {
 	APKFileSystemArchive::~APKFileSystemArchive()
 	{
 		std::map<String, std::vector< String > >::iterator iter = mFiles.find( mName );
-		iter->second.clear(); 
-		mFiles.erase( iter );  	
+		if (iter != mFiles.end()) {
+			iter->second.clear();
+			mFiles.erase( iter );
+		}
 		unload();
 	}
 
@@ -114,7 +116,7 @@ namespace {
 		if(asset)
 		{
 			off_t length = AAsset_getLength(asset);
-            stream.reset(new Ogre::MemoryDataStream(length, true, true));
+            stream = std::make_shared<MemoryDataStream>(filename, length, true, true);
 			memcpy(stream->getPtr(), AAsset_getBuffer(asset), length);
 			AAsset_close(asset);
 		}

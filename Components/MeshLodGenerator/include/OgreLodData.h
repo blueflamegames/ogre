@@ -32,7 +32,7 @@
 #include "OgreLodPrerequisites.h"
 #include "OgreVectorSet.h"
 #include "OgreVectorSetImpl.h"
-#include "OgreVector3.h"
+#include "OgreVector.h"
 #include "OgreHeaderPrefix.h"
 
 #ifndef MESHLOD_QUALITY
@@ -117,8 +117,16 @@ struct _OgreLodExport LodData {
         unsigned short submeshID; /// ID of the submesh. Usable with mMesh.getSubMesh() function.
         unsigned int vertexID[3]; /// Vertex ID in the buffer associated with the submeshID.
 
-        void computeNormal();
-        bool hasVertex(const Vertex* v) const;
+        void computeNormal()
+        {
+            normal = Math::calculateBasicFaceNormal(vertex[0]->position, vertex[1]->position,
+                                                    vertex[2]->position);
+        }
+        bool hasVertex(const Vertex* v) const
+        {
+            return (v == vertex[0] || v == vertex[1] || v == vertex[2]);
+        }
+
         unsigned int getVertexID(const Vertex* v) const;
         bool isMalformed();
     };

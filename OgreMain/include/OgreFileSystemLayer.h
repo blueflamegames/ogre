@@ -63,25 +63,14 @@ namespace Ogre
 
          The search order is
          1. Subdirectory in user Home (see @ref getWritablePath)
-         2. Executable path
-         3. Special system-wide config paths (only on Linux)
-         4. Current working directory
+         2. OS dependant config-paths
+         3. Current working directory
 
          @param filename The config file name (without path)
          @return The full path to the config file
-
-         @note on windows the "_d" suffix is appended to the basename in debug mode.
-         E.g. "resource.cfg" becomes "resources_d.cfg"
          */
         Ogre::String getConfigFilePath(Ogre::String filename) const
         {
-            #if OGRE_DEBUG_MODE && OGRE_PLATFORM == OGRE_PLATFORM_WIN32
-                // add OGRE_BUILD_SUFFIX (default: "_d") to config file names
-                Ogre::String::size_type pos = filename.rfind('.');
-                if (pos != Ogre::String::npos)
-                    filename = filename.substr(0, pos) + OGRE_BUILD_SUFFIX + filename.substr(pos);
-            #endif
-
             // look for the requested file in several locations:
             
             // 1. in the writable path (so user can provide custom files)
@@ -90,9 +79,9 @@ namespace Ogre
                 return path;
             
             // 2. in the config file search paths
-            for (size_t i = 0; i < mConfigPaths.size(); ++i)
+            for (const String& cpath : mConfigPaths)
             {
-                path = mConfigPaths[i] + filename;
+                path = cpath + filename;
                 if (fileExists(path))
                     return path;
             }
@@ -107,9 +96,9 @@ namespace Ogre
 
          | Platform         | Location |
          |------------------|----------|
-         | Windows          | Documents/Ogre/$subdir/ |
+         | Windows          | Documents/$subdir/ |
          | Linux            | ~/.cache/$subdir/ |
-         | OSX              | ~/Library/Application Support/Ogre/$subdir/ |
+         | OSX              | ~/Library/Application Support/$subdir/ |
          | iOS              | NSDocumentDirectory |
          | Android / Emscripten | n/a |
 

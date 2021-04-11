@@ -91,6 +91,7 @@ namespace Ogre
         typedef std::vector<InstancedEntity*>  InstancedEntityVec;
         typedef std::vector<Vector4>           CustomParamsVec;
     protected:
+        typedef TransformBase<3, float>        Matrix3x4f;
         RenderOperation     mRenderOperation;
         size_t              mInstancesPerBatch;
 
@@ -154,7 +155,7 @@ namespace Ogre
             takes number of floats in the array, not number of matrices. Assumes mCachedCamera
             contains the camera which is about to be rendered to.
         */
-        void makeMatrixCameraRelative3x4( float *mat3x4, size_t numFloats );
+        void makeMatrixCameraRelative3x4( Matrix3x4f *mat3x4, size_t count );
 
         /// Returns false on errors that would prevent building this batch from the given submesh
         virtual bool checkSubMeshCompatibility( const SubMesh* baseSubMesh );
@@ -211,7 +212,7 @@ namespace Ogre
         /** Constructs all the data needed to use this batch, as well as the
             InstanceEntities. Placed here because in the constructor virtual
             tables may not have been yet filled.
-        @param baseSubMesh A sub mesh which the instances will be based upon from.
+        @param baseSubMesh A sub mesh which the instances will be based upon from
         @remarks
             Call this only ONCE. This is done automatically by Ogre::InstanceManager
             Caller is responsable for freeing buffers in this RenderOperation
@@ -230,6 +231,7 @@ namespace Ogre
             reference from Render Op.
             For example, Hardware based instancing uses it's own vertex buffer for the
             last source binding, but shares the other sources.
+        @param baseSubMesh A sub mesh which the instances will be based upon from
         @param renderOperation The RenderOp to reference.
         @remarks
             Caller is responsable for freeing buffers passed as input arguments

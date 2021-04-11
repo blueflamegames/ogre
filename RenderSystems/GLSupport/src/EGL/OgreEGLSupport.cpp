@@ -36,7 +36,9 @@ THE SOFTWARE.
 
 #include "OgreEGLSupport.h"
 #include "OgreEGLWindow.h"
+#if OGRE_PLATFORM != OGRE_PLATFORM_EMSCRIPTEN
 #include "OgreEGLRenderTexture.h"
+#endif
 
 
 namespace Ogre {
@@ -44,7 +46,7 @@ namespace Ogre {
 
     EGLSupport::EGLSupport(int profile)
         : GLNativeSupport(profile), mGLDisplay(0),
-          mNativeDisplay(0)
+          mNativeDisplay(EGL_DEFAULT_DISPLAY)
     {
     }
 
@@ -143,23 +145,32 @@ namespace Ogre {
 
     ::EGLConfig EGLSupport::getGLConfigFromContext(::EGLContext context)
     {
-        ::EGLConfig glConfig = 0;
+        ::EGLConfig glConfig;
+        EGLint id = 0;
+        ::EGLConfig *configs;
+        EGLint numConfigs;
 
-        if (eglQueryContext(mGLDisplay, context, EGL_CONFIG_ID, (EGLint *) &glConfig) == EGL_FALSE)
+        if (eglQueryContext(mGLDisplay, context, EGL_CONFIG_ID, &id) == EGL_FALSE)
         {
             OGRE_EXCEPT(Exception::ERR_RENDERINGAPI_ERROR, "Fail to get config from context");
             return 0;
         }
         EGL_CHECK_ERROR
+        configs = getConfigs(&numConfigs);
+        glConfig = configs[id];
+        free(configs);
         return glConfig;
     }
 
     ::EGLConfig EGLSupport::getGLConfigFromDrawable(::EGLSurface drawable,
                                                     unsigned int *w, unsigned int *h)
     {
-        ::EGLConfig glConfig = 0;
+        ::EGLConfig glConfig;
+        EGLint id = 0;
+        ::EGLConfig *configs;
+        EGLint numConfigs;
 
-        if (eglQuerySurface(mGLDisplay, drawable, EGL_CONFIG_ID, (EGLint *) &glConfig) == EGL_FALSE)
+        if (eglQuerySurface(mGLDisplay, drawable, EGL_CONFIG_ID, &id) == EGL_FALSE)
         {
             OGRE_EXCEPT(Exception::ERR_RENDERINGAPI_ERROR, "Fail to get config from drawable");
             return 0;
@@ -169,6 +180,9 @@ namespace Ogre {
         EGL_CHECK_ERROR
         eglQuerySurface(mGLDisplay, drawable, EGL_HEIGHT, (EGLint *) h);
         EGL_CHECK_ERROR
+        configs = getConfigs(&numConfigs);
+        glConfig = configs[id];
+        free(configs);
         return glConfig;
     }
 
@@ -311,6 +325,11 @@ namespace Ogre {
             contextAttrs[0] = EGL_NONE;
         }
 
+#if OGRE_PLATFORM == OGRE_PLATFORM_EMSCRIPTEN
+        // try WebGL2 context
+        contextAttrs[1] = 3;
+#endif
+
         ::EGLContext context = 0;
         if (!eglDisplay)
         {
@@ -322,6 +341,16 @@ namespace Ogre {
             context = eglCreateContext(eglDisplay, glconfig, 0, contextAttrs);
             EGL_CHECK_ERROR
         }
+
+#if OGRE_PLATFORM == OGRE_PLATFORM_EMSCRIPTEN
+        if (!context)
+        {
+            // fall back to WebGL
+            contextAttrs[1] = 2;
+            context = eglCreateContext(mGLDisplay, glconfig, shareList, contextAttrs);
+            EGL_CHECK_ERROR
+        }
+#endif
 
         if (!context)
         {
@@ -350,21 +379,26 @@ namespace Ogre {
     void EGLSupport::initialiseExtensions() {
         assert (mGLDisplay);
 
-        const char* verStr = eglQueryString(mGLDisplay, EGL_VERSION);
-        LogManager::getSingleton().stream() << "EGL_VERSION = " << verStr;
+        const char* propStr = eglQueryString(mGLDisplay, EGL_VENDOR);
+        LogManager::getSingleton().stream() << "EGL_VENDOR = " << propStr;
 
-        const char* extensionsString;
-
-        // This is more realistic than using glXGetClientString:
-        extensionsString = eglQueryString(mGLDisplay, EGL_EXTENSIONS);
-
-        LogManager::getSingleton().stream() << "EGL_EXTENSIONS = " << extensionsString;
+        propStr = eglQueryString(mGLDisplay, EGL_VERSION);
+        LogManager::getSingleton().stream() << "EGL_VERSION = " << propStr;
 
         StringStream ext;
+
+        // client extensions
+        propStr = eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS);
+        if(propStr) // NULL = failure case
+            ext << propStr << " ";
+
+        // display extension
+        propStr = eglQueryString(mGLDisplay, EGL_EXTENSIONS);
+        ext << propStr;
+
+        LogManager::getSingleton().stream() << "EGL_EXTENSIONS = " << ext.str();
+
         String instr;
-
-        ext << extensionsString;
-
         while(ext >> instr)
         {
             extensionList.insert(instr);
@@ -374,5 +408,14 @@ namespace Ogre {
     void EGLSupport::setGLDisplay( EGLDisplay val )
     {
         mGLDisplay = val;
+    }
+
+    GLPBuffer* EGLSupport::createPBuffer( PixelComponentType format, size_t width, size_t height )
+    {
+#if OGRE_PLATFORM == OGRE_PLATFORM_EMSCRIPTEN
+        return nullptr;
+#else
+        return new EGLPBuffer(this, format, width, height);
+#endif
     }
 }

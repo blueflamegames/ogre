@@ -158,17 +158,22 @@ void CGProgramWriter::writeProgramDependencies(std::ostream& os, Program* progra
     os << "//                         PROGRAM DEPENDENCIES" << std::endl;
     os << "//-----------------------------------------------------------------------------" << std::endl;
 
+    os << "#include <OgreUnifiedShader.h>" << std::endl;
+
+    const auto& rgm = ResourceGroupManager::getSingleton();
 
     for (unsigned int i=0; i < program->getDependencyCount(); ++i)
     {
-        const String& curDependency = program->getDependency(i);
+        String curDependency = program->getDependency(i) + ".cg";
+        if (!rgm.resourceExistsInAnyGroup(curDependency))
+            curDependency = program->getDependency(i) + ".glsl"; // fall back to glsl extension
 
-        os << "#include " << '\"' << curDependency << "." << getTargetLanguage() << '\"' << std::endl;
+        os << "#include \"" << curDependency << '\"' << std::endl;
     }
 }
 
 //-----------------------------------------------------------------------
-void CGProgramWriter::writeUniformParameter(std::ostream& os, UniformParameterPtr parameter)
+void CGProgramWriter::writeUniformParameter(std::ostream& os, const UniformParameterPtr& parameter)
 {
     os << mGpuConstTypeMap[parameter->getType()];
     os << "\t"; 

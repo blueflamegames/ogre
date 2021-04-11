@@ -115,8 +115,8 @@ namespace Ogre {
         HardwareVertexBufferSharedPtr vbuf =
             HardwareBufferManager::getSingleton().createVertexBuffer(
             decl->getVertexSize(POSITION_BINDING), mRenderOp.vertexData->vertexCount,
-            HardwareBuffer::HBU_STATIC_WRITE_ONLY// mostly static except during resizing
-            );
+            HardwareBuffer::HBU_DYNAMIC_WRITE_ONLY,// mostly static except during resizing
+            true);//Workaround, using shadow buffer to avoid stall due to buffer mapping
         // Bind buffer
         mRenderOp.vertexData->vertexBufferBinding->setBinding(POSITION_BINDING, vbuf);
 
@@ -131,12 +131,14 @@ namespace Ogre {
             return;
 
         VertexBufferBinding* bind = mRenderOp.vertexData->vertexBufferBinding;
-        bind->unsetBinding(POSITION_BINDING);
+        if (bind->isBufferBound(POSITION_BINDING))
+            bind->unsetBinding(POSITION_BINDING);
 
         // Remove all texcoord element declarations
         if(mNumTexCoordsInBuffer > 0)
         {
-            bind->unsetBinding(TEXCOORD_BINDING);
+            if (bind->isBufferBound (TEXCOORD_BINDING))
+                bind->unsetBinding(TEXCOORD_BINDING);
 
             VertexDeclaration* decl = mRenderOp.vertexData->vertexDeclaration;
             for(size_t i = mNumTexCoordsInBuffer; i > 0; --i)
@@ -217,11 +219,10 @@ namespace Ogre {
             }
 
             // Also add children
-            ChildIterator it = getChildIterator();
-            while (it.hasMoreElements())
+            for (const auto& p : mChildren)
             {
                 // Give children Z-order 1 higher than this
-                it.getNext()->_updateRenderQueue(queue);
+                p.second->_updateRenderQueue(queue);
             }
         }
     }
@@ -251,8 +252,8 @@ namespace Ogre {
 
         HardwareVertexBufferSharedPtr vbuf =
             mRenderOp.vertexData->vertexBufferBinding->getBuffer(POSITION_BINDING);
-        float* pPos = static_cast<float*>(
-            vbuf->lock(HardwareBuffer::HBL_DISCARD) );
+        HardwareBufferLockGuard vbufLock(vbuf, HardwareBuffer::HBL_DISCARD);
+        float* pPos = static_cast<float*>(vbufLock.pData);
 
         // Use the furthest away depth value, since materials should have depth-check off
         // This initialised the depth buffer for any 3D objects in front
@@ -272,8 +273,6 @@ namespace Ogre {
         *pPos++ = right;
         *pPos++ = bottom;
         *pPos++ = zValue;
-
-        vbuf->unlock();
     }
     //---------------------------------------------------------------------
     void PanelOverlayElement::updateTextureGeometry(void)
@@ -301,11 +300,9 @@ namespace Ogre {
                 size_t offset = VertexElement::getTypeSize(VET_FLOAT2) * mNumTexCoordsInBuffer;
                 for (size_t i = mNumTexCoordsInBuffer; i < numLayers; ++i)
                 {
-                    decl->addElement(TEXCOORD_BINDING,
-                        offset, VET_FLOAT2, VES_TEXTURE_COORDINATES, 
-                        static_cast<unsigned short>(i));
-                    offset += VertexElement::getTypeSize(VET_FLOAT2);
-
+                    offset += decl->addElement(TEXCOORD_BINDING, offset, VET_FLOAT2,
+                                               VES_TEXTURE_COORDINATES, ushort(i))
+                                  .getSize();
                 }
             }
 
@@ -316,8 +313,8 @@ namespace Ogre {
                 HardwareVertexBufferSharedPtr newbuf =
                     HardwareBufferManager::getSingleton().createVertexBuffer(
                     decl->getVertexSize(TEXCOORD_BINDING), mRenderOp.vertexData->vertexCount,
-                    HardwareBuffer::HBU_STATIC_WRITE_ONLY // mostly static except during resizing
-                    );
+                    HardwareBuffer::HBU_DYNAMIC_WRITE_ONLY, // mostly static except during resizing
+                    true);//Workaround, using shadow buffer to avoid stall due to buffer mapping
                 // Bind buffer, note this will unbind the old one and destroy the buffer it had
                 mRenderOp.vertexData->vertexBufferBinding->setBinding(TEXCOORD_BINDING, newbuf);
                 // Set num tex coords in use now
@@ -329,8 +326,8 @@ namespace Ogre {
             {
                 HardwareVertexBufferSharedPtr vbuf =
                     mRenderOp.vertexData->vertexBufferBinding->getBuffer(TEXCOORD_BINDING);
-                float* pVBStart = static_cast<float*>(
-                    vbuf->lock(HardwareBuffer::HBL_DISCARD) );
+                HardwareBufferLockGuard vbufLock(vbuf, HardwareBuffer::HBL_DISCARD);
+                float* pVBStart = static_cast<float*>(vbufLock.pData);
 
                 size_t uvSize = VertexElement::getTypeSize(VET_FLOAT2) / sizeof(float);
                 size_t vertexSize = decl->getVertexSize(TEXCOORD_BINDING) / sizeof(float);
@@ -366,7 +363,6 @@ namespace Ogre {
                     pTex[0] = upperX;
                     pTex[1] = upperY;
                 }
-                vbuf->unlock();
             }
         }
     }

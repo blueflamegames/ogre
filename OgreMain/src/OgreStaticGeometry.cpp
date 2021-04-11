@@ -30,7 +30,6 @@ THE SOFTWARE.
 #include "OgreEntity.h"
 #include "OgreEdgeListBuilder.h"
 #include "OgreLodStrategy.h"
-#include "OgreIteratorWrappers.h"
 #include "OgreSubEntity.h"
 
 namespace Ogre {
@@ -237,9 +236,8 @@ namespace Ogre {
                 VES_POSITION);
         HardwareVertexBufferSharedPtr vbuf =
             vertexData->vertexBufferBinding->getBuffer(posElem->getSource());
-        unsigned char* vertex =
-            static_cast<unsigned char*>(
-                vbuf->lock(HardwareBuffer::HBL_READ_ONLY));
+        HardwareBufferLockGuard vbufLock(vbuf, HardwareBuffer::HBL_READ_ONLY);
+        unsigned char* vertex = static_cast<unsigned char*>(vbufLock.pData);
         float* pFloat;
 
         Vector3 min = Vector3::ZERO, max = Vector3::UNIT_SCALE;
@@ -268,7 +266,6 @@ namespace Ogre {
             }
 
         }
-        vbuf->unlock();
         return AxisAlignedBox(min, max);
     }
     //--------------------------------------------------------------------------
@@ -385,24 +382,19 @@ namespace Ogre {
         bool use32bitIndexes =
             id->indexBuffer->getType() == HardwareIndexBuffer::IT_32BIT;
         IndexRemap indexRemap;
+        HardwareBufferLockGuard indexLock(id->indexBuffer,
+                                          id->indexStart * id->indexBuffer->getIndexSize(), 
+                                          id->indexCount * id->indexBuffer->getIndexSize(), 
+                                          HardwareBuffer::HBL_READ_ONLY);
         if (use32bitIndexes)
         {
-            uint32 *p32 = static_cast<uint32*>(id->indexBuffer->lock(
-                id->indexStart * id->indexBuffer->getIndexSize(), 
-                id->indexCount * id->indexBuffer->getIndexSize(), 
-                HardwareBuffer::HBL_READ_ONLY));
-            buildIndexRemap(p32, id->indexCount, indexRemap);
-            id->indexBuffer->unlock();
+            buildIndexRemap(static_cast<uint32*>(indexLock.pData), id->indexCount, indexRemap);
         }
         else
         {
-            uint16 *p16 = static_cast<uint16*>(id->indexBuffer->lock(
-                id->indexStart * id->indexBuffer->getIndexSize(), 
-                id->indexCount * id->indexBuffer->getIndexSize(), 
-                HardwareBuffer::HBL_READ_ONLY));
-            buildIndexRemap(p16, id->indexCount, indexRemap);
-            id->indexBuffer->unlock();
+            buildIndexRemap(static_cast<uint16*>(indexLock.pData), id->indexCount, indexRemap);
         }
+        indexLock.unlock();
         if (indexRemap.size() == vd->vertexCount)
         {
             // ha, complete usage after all
@@ -441,10 +433,8 @@ namespace Ogre {
             // to the new ones. By nature of the map the remap is in order of
             // indexes in the old buffer, but note that we're not guaranteed to
             // address every vertex (which is kinda why we're here)
-            uchar* pSrcBase = static_cast<uchar*>(
-                oldBuf->lock(HardwareBuffer::HBL_READ_ONLY));
-            uchar* pDstBase = static_cast<uchar*>(
-                newBuf->lock(HardwareBuffer::HBL_DISCARD));
+            HardwareBufferLockGuard oldBufLock(oldBuf, HardwareBuffer::HBL_READ_ONLY);
+            HardwareBufferLockGuard newBufLock(newBuf, HardwareBuffer::HBL_DISCARD);
             size_t vertexSize = oldBuf->getVertexSize();
             // Buffers should be the same size
             assert (vertexSize == newBuf->getVertexSize());
@@ -455,14 +445,10 @@ namespace Ogre {
                 assert (r->first < oldBuf->getNumVertices());
                 assert (r->second < newBuf->getNumVertices());
 
-                uchar* pSrc = pSrcBase + r->first * vertexSize;
-                uchar* pDst = pDstBase + r->second * vertexSize;
+                uchar* pSrc = static_cast<uchar*>(oldBufLock.pData) + r->first * vertexSize;
+                uchar* pDst = static_cast<uchar*>(newBufLock.pData) + r->second * vertexSize;
                 memcpy(pDst, pSrc, vertexSize);
             }
-            // unlock
-            oldBuf->unlock();
-            newBuf->unlock();
-
         }
 
         // Now create a new index buffer
@@ -471,32 +457,25 @@ namespace Ogre {
                 id->indexBuffer->getType(), id->indexCount,
                 HardwareBuffer::HBU_STATIC);
 
+        HardwareBufferLockGuard srcIndexLock(id->indexBuffer,
+                                             id->indexStart * id->indexBuffer->getIndexSize(), 
+                                             id->indexCount * id->indexBuffer->getIndexSize(), 
+                                             HardwareBuffer::HBL_READ_ONLY);
+        HardwareBufferLockGuard dstIndexLock(ibuf, HardwareBuffer::HBL_DISCARD);
         if (use32bitIndexes)
         {
-            uint32 *pSrc32, *pDst32;
-            pSrc32 = static_cast<uint32*>(id->indexBuffer->lock(
-                id->indexStart * id->indexBuffer->getIndexSize(), 
-                id->indexCount * id->indexBuffer->getIndexSize(), 
-                HardwareBuffer::HBL_READ_ONLY));
-            pDst32 = static_cast<uint32*>(ibuf->lock(
-                HardwareBuffer::HBL_DISCARD));
+            uint32 *pSrc32 = static_cast<uint32*>(srcIndexLock.pData);
+            uint32 *pDst32 = static_cast<uint32*>(dstIndexLock.pData);
             remapIndexes(pSrc32, pDst32, indexRemap, id->indexCount);
-            id->indexBuffer->unlock();
-            ibuf->unlock();
         }
         else
         {
-            uint16 *pSrc16, *pDst16;
-            pSrc16 = static_cast<uint16*>(id->indexBuffer->lock(
-                id->indexStart * id->indexBuffer->getIndexSize(), 
-                id->indexCount * id->indexBuffer->getIndexSize(), 
-                HardwareBuffer::HBL_READ_ONLY));
-            pDst16 = static_cast<uint16*>(ibuf->lock(
-                HardwareBuffer::HBL_DISCARD));
+            uint16 *pSrc16 = static_cast<uint16*>(srcIndexLock.pData);
+            uint16 *pDst16 = static_cast<uint16*>(dstIndexLock.pData);
             remapIndexes(pSrc16, pDst16, indexRemap, id->indexCount);
-            id->indexBuffer->unlock();
-            ibuf->unlock();
         }
+        srcIndexLock.unlock();
+        dstIndexLock.unlock();
 
         targetGeomLink->indexData = OGRE_NEW IndexData();
         targetGeomLink->indexData->indexStart = 0;
@@ -523,13 +502,10 @@ namespace Ogre {
             }
         }
         // Iterate through all the child-nodes
-        SceneNode::ConstChildNodeIterator nodei = node->getChildIterator();
-
-        while (nodei.hasMoreElements())
+        for (auto c : node->getChildren())
         {
-            const SceneNode* subNode = static_cast<const SceneNode*>(nodei.getNext());
             // Add this subnode and its children...
-            addSceneNode( subNode );
+            addSceneNode( static_cast<const SceneNode*>(c) );
         }
     }
     //--------------------------------------------------------------------------
@@ -896,8 +872,8 @@ namespace Ogre {
         return LODIterator(mLodBucketList.begin(), mLodBucketList.end());
     }
     //---------------------------------------------------------------------
-    ShadowCaster::ShadowRenderableListIterator
-    StaticGeometry::Region::getShadowVolumeRenderableIterator(
+    const ShadowCaster::ShadowRenderableList&
+    StaticGeometry::Region::getShadowVolumeRenderableList(
         ShadowTechnique shadowTechnique, const Light* light,
         HardwareIndexBufferSharedPtr* indexBuffer, size_t* indexBufferUsedSize,
         bool extrude, Real extrusionDistance, unsigned long flags)
@@ -924,18 +900,13 @@ namespace Ogre {
             light, shadowRendList, flags);
 
 
-        return ShadowCaster::ShadowRenderableListIterator(shadowRendList.begin(), shadowRendList.end());
+        return shadowRendList;
 
     }
     //--------------------------------------------------------------------------
     EdgeData* StaticGeometry::Region::getEdgeList(void)
     {
         return mLodBucketList[mCurrentLod]->getEdgeList();
-    }
-    //--------------------------------------------------------------------------
-    bool StaticGeometry::Region::hasEdgeList(void)
-    {
-        return getEdgeList() != 0;
     }
     //--------------------------------------------------------------------------
     void StaticGeometry::Region::dump(std::ofstream& of) const
@@ -1104,8 +1075,6 @@ namespace Ogre {
 
             if (stencilShadows)
             {
-                MaterialBucket::GeometryIterator geomIt =
-                    mat->getGeometryIterator();
                 // Check if we have vertex programs here
                 Technique* t = mat->getMaterial()->getBestTechnique();
                 if (t)
@@ -1120,10 +1089,8 @@ namespace Ogre {
                     }
                 }
 
-                while (geomIt.hasMoreElements())
+                for (GeometryBucket* geom : mat->getGeometryList())
                 {
-                    GeometryBucket* geom = geomIt.getNext();
-
                     // Check we're dealing with 16-bit indexes here
                     // Since stencil shadows can only deal with 16-bit
                     // More than that and stencil is probably too CPU-heavy
@@ -1201,9 +1168,7 @@ namespace Ogre {
         // We need to search the edge list for silhouette edges
         if (!mEdgeList)
         {
-            OGRE_EXCEPT(Exception::ERR_INVALIDPARAMS,
-                "You enabled stencil shadows after the buid process!",
-                "StaticGeometry::LODBucket::getShadowVolumeRenderableIterator");
+            OGRE_EXCEPT(Exception::ERR_INVALIDPARAMS, "You enabled stencil shadows after the build process!");
         }
 
         // Init shadow renderable list if required
@@ -1539,18 +1504,9 @@ namespace Ogre {
         mIndexData->indexBuffer = HardwareBufferManager::getSingleton()
             .createIndexBuffer(mIndexType, mIndexData->indexCount,
                 HardwareBuffer::HBU_STATIC_WRITE_ONLY);
-        uint32* p32Dest = 0;
-        uint16* p16Dest = 0;
-        if (mIndexType == HardwareIndexBuffer::IT_32BIT)
-        {
-            p32Dest = static_cast<uint32*>(
-                mIndexData->indexBuffer->lock(HardwareBuffer::HBL_DISCARD));
-        }
-        else
-        {
-            p16Dest = static_cast<uint16*>(
-                mIndexData->indexBuffer->lock(HardwareBuffer::HBL_DISCARD));
-        }
+        HardwareBufferLockGuard dstIndexLock(mIndexData->indexBuffer, HardwareBuffer::HBL_DISCARD);
+        uint32* p32Dest = static_cast<uint32*>(dstIndexLock.pData);
+        uint16* p16Dest = static_cast<uint16*>(dstIndexLock.pData);
         // create all vertex buffers, and lock
         ushort b;
         ushort posBufferIdx = dcl->findElementBySemantic(VES_POSITION)->getSource();
@@ -1593,32 +1549,24 @@ namespace Ogre {
             QueuedGeometry* geom = *gi;
             // Copy indexes across with offset
             IndexData* srcIdxData = geom->geometry->indexData;
+            HardwareBufferLockGuard srcIdxLock(srcIdxData->indexBuffer,
+                                               srcIdxData->indexStart * srcIdxData->indexBuffer->getIndexSize(), 
+                                               srcIdxData->indexCount * srcIdxData->indexBuffer->getIndexSize(),
+                                               HardwareBuffer::HBL_READ_ONLY);
             if (mIndexType == HardwareIndexBuffer::IT_32BIT)
             {
-                // Lock source indexes
-                uint32* pSrc = static_cast<uint32*>(
-                    srcIdxData->indexBuffer->lock(
-                        srcIdxData->indexStart * srcIdxData->indexBuffer->getIndexSize(), 
-                        srcIdxData->indexCount * srcIdxData->indexBuffer->getIndexSize(),
-                        HardwareBuffer::HBL_READ_ONLY));
-
+                uint32* pSrc = static_cast<uint32*>(srcIdxLock.pData);
                 copyIndexes(pSrc, p32Dest, srcIdxData->indexCount, indexOffset);
                 p32Dest += srcIdxData->indexCount;
-                srcIdxData->indexBuffer->unlock();
             }
             else
             {
                 // Lock source indexes
-                uint16* pSrc = static_cast<uint16*>(
-                    srcIdxData->indexBuffer->lock(
-                    srcIdxData->indexStart * srcIdxData->indexBuffer->getIndexSize(), 
-                    srcIdxData->indexCount * srcIdxData->indexBuffer->getIndexSize(),
-                    HardwareBuffer::HBL_READ_ONLY));
-
+                uint16* pSrc = static_cast<uint16*>(srcIdxLock.pData);
                 copyIndexes(pSrc, p16Dest, srcIdxData->indexCount, indexOffset);
                 p16Dest += srcIdxData->indexCount;
-                srcIdxData->indexBuffer->unlock();
             }
+            srcIdxLock.unlock();
 
             // Now deal with vertex buffers
             // we can rely on buffer counts / formats being the same
@@ -1627,10 +1575,9 @@ namespace Ogre {
             for (b = 0; b < binds->getBufferCount(); ++b)
             {
                 // lock source
-                HardwareVertexBufferSharedPtr srcBuf =
-                    srcBinds->getBuffer(b);
-                uchar* pSrcBase = static_cast<uchar*>(
-                    srcBuf->lock(HardwareBuffer::HBL_READ_ONLY));
+                HardwareVertexBufferSharedPtr srcBuf = srcBinds->getBuffer(b);
+                HardwareBufferLockGuard srcBufLock(srcBuf, HardwareBuffer::HBL_READ_ONLY);
+                uchar* pSrcBase = static_cast<uchar*>(srcBufLock.pData);
                 // Get buffer lock pointer, we'll update this later
                 uchar* pDstBase = destBufferLocks[b];
                 size_t bufInc = srcBuf->getVertexSize();
@@ -1699,14 +1646,13 @@ namespace Ogre {
 
                 // Update pointer
                 destBufferLocks[b] = pDstBase;
-                srcBuf->unlock();
             }
 
             indexOffset += geom->geometry->vertexData->vertexCount;
         }
 
         // Unlock everything
-        mIndexData->indexBuffer->unlock();
+        dstIndexLock.unlock();
         for (b = 0; b < binds->getBufferCount(); ++b)
         {
             binds->getBuffer(b)->unlock();
@@ -1717,23 +1663,24 @@ namespace Ogre {
         if (stencilShadows)
         {
             HardwareVertexBufferSharedPtr buf = binds->getBuffer(posBufferIdx);
-            void* pSrc = buf->lock(HardwareBuffer::HBL_NORMAL);
+            HardwareBufferLockGuard bufLock(buf, HardwareBuffer::HBL_NORMAL);
+            void* pSrc = bufLock.pData;
             // Point dest at second half (remember vertexcount is original count)
             void* pDest = static_cast<uchar*>(pSrc) +
                 buf->getVertexSize() * mVertexData->vertexCount;
             memcpy(pDest, pSrc, buf->getVertexSize() * mVertexData->vertexCount);
-            buf->unlock();
+            bufLock.unlock();
 
             // Also set up hardware W buffer if appropriate
             RenderSystem* rend = Root::getSingleton().getRenderSystem();
-            if (rend && rend->getCapabilities()->hasCapability(RSC_VERTEX_PROGRAM))
+            if (rend)
             {
                 buf = HardwareBufferManager::getSingleton().createVertexBuffer(
                     sizeof(float), mVertexData->vertexCount * 2,
                     HardwareBuffer::HBU_STATIC_WRITE_ONLY, false);
                 // Fill the first half with 1.0, second half with 0.0
-                float *pW = static_cast<float*>(
-                    buf->lock(HardwareBuffer::HBL_DISCARD));
+                bufLock.lock(buf, HardwareBuffer::HBL_DISCARD);
+                float *pW = static_cast<float*>(bufLock.pData);
                 size_t v;
                 for (v = 0; v < mVertexData->vertexCount; ++v)
                 {
@@ -1743,7 +1690,7 @@ namespace Ogre {
                 {
                     *pW++ = 0.0f;
                 }
-                buf->unlock();
+                bufLock.unlock();
                 mVertexData->hardwareShadowVolWBuffer = buf;
             }
         }

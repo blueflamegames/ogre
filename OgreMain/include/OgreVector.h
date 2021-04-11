@@ -301,7 +301,7 @@ namespace Ogre
         you interpret the values.
     */
     template<int dims, typename T>
-    class _OgreExport Vector : public VectorBase<dims, T>
+    class Vector : public VectorBase<dims, T>
     {
     public:
         using VectorBase<dims, T>::ptr;
@@ -825,6 +825,10 @@ namespace Ogre
         // the final version"
         Real a = Math::Sqrt(((const Vector3*)this)->squaredLength() * dest.squaredLength());
         Real b = a + dest.dotProduct(*this);
+
+        if (Math::RealEqual(b, 2 * a) || a == 0)
+            return Quaternion::IDENTITY;
+
         Vector3 axis;
 
         if (b < (Real)1e-06 * a)
@@ -873,6 +877,34 @@ namespace Ogre
                 return y > 0 ? UNIT_Y : NEGATIVE_UNIT_Y;
             else
                 return z > 0 ? UNIT_Z : NEGATIVE_UNIT_Z;
+    }
+
+    // Math functions
+    inline Vector3 Math::calculateBasicFaceNormal(const Vector3& v1, const Vector3& v2, const Vector3& v3)
+    {
+        Vector3 normal = (v2 - v1).crossProduct(v3 - v1);
+        normal.normalise();
+        return normal;
+    }
+    inline Vector4 Math::calculateFaceNormal(const Vector3& v1, const Vector3& v2, const Vector3& v3)
+    {
+        Vector3 normal = calculateBasicFaceNormal(v1, v2, v3);
+        // Now set up the w (distance of tri from origin
+        return Vector4(normal.x, normal.y, normal.z, -(normal.dotProduct(v1)));
+    }
+    inline Vector3 Math::calculateBasicFaceNormalWithoutNormalize(
+        const Vector3& v1, const Vector3& v2, const Vector3& v3)
+    {
+        return (v2 - v1).crossProduct(v3 - v1);
+    }
+
+    inline Vector4 Math::calculateFaceNormalWithoutNormalize(const Vector3& v1,
+                                                             const Vector3& v2,
+                                                             const Vector3& v3)
+    {
+        Vector3 normal = calculateBasicFaceNormalWithoutNormalize(v1, v2, v3);
+        // Now set up the w (distance of tri from origin)
+        return Vector4(normal.x, normal.y, normal.z, -(normal.dotProduct(v1)));
     }
     /** @} */
     /** @} */

@@ -33,7 +33,8 @@ THE SOFTWARE.
 
 #include "OgreCommon.h"
 #include "OgreController.h"
-#include "OgreIteratorWrappers.h"
+#include "OgreControllerManager.h"
+#include "OgreIteratorWrapper.h"
 #include "Threading/OgreThreadHeaders.h"
 #include "OgreHeaderPrefix.h"
 
@@ -286,10 +287,18 @@ namespace Ogre {
     {
     protected:
         AnimationState* mTargetAnimationState;
+        bool mAddTime;
     public:
-        /** Constructor, pass in the target animation state. */
-        AnimationStateControllerValue(AnimationState* targetAnimationState)
-            : mTargetAnimationState(targetAnimationState) {}
+        /// @deprecated use create instead
+        AnimationStateControllerValue(AnimationState* targetAnimationState, bool addTime = false)
+            : mTargetAnimationState(targetAnimationState), mAddTime(addTime) {}
+
+        /**
+         * create an instance of this class
+         * @param targetAnimationState
+         * @param addTime if true, increment time instead of setting to an absolute position
+         */
+        static ControllerValueRealPtr create(AnimationState* targetAnimationState, bool addTime = false);
 
         /** ControllerValue implementation. */
         Real getValue(void) const
@@ -300,7 +309,10 @@ namespace Ogre {
         /** ControllerValue implementation. */
         void setValue(Real value)
         {
-            mTargetAnimationState->setTimePosition(value * mTargetAnimationState->getLength());
+            if(mAddTime)
+                mTargetAnimationState->addTime(value);
+            else
+                mTargetAnimationState->setTimePosition(value * mTargetAnimationState->getLength());
         }
     };
 

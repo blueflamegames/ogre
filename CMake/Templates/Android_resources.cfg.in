@@ -1,3 +1,10 @@
+# Ogre Core Resources
+[OgreInternal]
+APKFileSystem=/ShadowVolume
+APKFileSystem=/RTShaderLib/materials
+APKFileSystem=/RTShaderLib/GLSL
+APKFileSystem=/Terrain
+
 # Resources required by the sample browser and most samples.
 [Essential]
 APKZip=/packs/SdkTrays.zip
@@ -9,12 +16,11 @@ APKFileSystem=/thumbnails
 [General]
 # Bites uses the next entry to discover the platform shaders
 APKFileSystem=/
-APKFileSystem=/fonts
 APKFileSystem=/materials/programs
 APKFileSystem=/materials/scripts
 APKFileSystem=/materials/textures
 APKFileSystem=/materials/textures/glTF2_IBL
-APKFileSystem=/materials/textures/nvidia
+APKFileSystem=/materials/textures/terrain
 APKFileSystem=/models
 APKFileSystem=/particle
 APKFileSystem=/materials/scripts/SSAO
@@ -33,3 +39,6 @@ APKFileSystem=/PBR
 APKFileSystem=/HLMS
 APKFileSystem=/DeferredShadingMedia
 APKFileSystem=/DeferredShadingMedia/DeferredShading/post
+
+[BSPWorld]
+APKZip=/packs/oa_rpg3dm2.pk3

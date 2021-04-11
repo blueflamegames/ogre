@@ -79,17 +79,14 @@ bool FFPTexturing::resolveUniformParams(TextureUnitParams* textureUnitParams, Pr
 {
     Program* vsProgram = programSet->getCpuProgram(GPT_VERTEX_PROGRAM);
     Program* psProgram = programSet->getCpuProgram(GPT_FRAGMENT_PROGRAM);
-    bool hasError = false;
     
     // Resolve texture sampler parameter.       
-    textureUnitParams->mTextureSampler = psProgram->resolveParameter(textureUnitParams->mTextureSamplerType, textureUnitParams->mTextureSamplerIndex, (uint16)GPV_GLOBAL, "gTextureSampler");
-    hasError |= !textureUnitParams->mTextureSampler;
+    textureUnitParams->mTextureSampler = psProgram->resolveParameter(textureUnitParams->mTextureSamplerType, "gTextureSampler", textureUnitParams->mTextureSamplerIndex);
 
     // Resolve texture matrix parameter.
     if (needsTextureMatrix(textureUnitParams->mTextureUnitState))
     {               
-        textureUnitParams->mTextureMatrix = vsProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_TEXTURE_MATRIX, textureUnitParams->mTextureSamplerIndex);
-        hasError |= !(textureUnitParams->mTextureMatrix.get());
+        textureUnitParams->mTextureMatrix = vsProgram->resolveParameter(GpuProgramParameters::ACT_TEXTURE_MATRIX, textureUnitParams->mTextureSamplerIndex);
     }
 
     switch (textureUnitParams->mTexCoordCalcMethod)
@@ -102,51 +99,24 @@ bool FFPTexturing::resolveUniformParams(TextureUnitParams* textureUnitParams, Pr
     case TEXCALC_ENVIRONMENT_MAP_PLANAR:    
     case TEXCALC_ENVIRONMENT_MAP_NORMAL:
         //TODO: change the following 'mWorldITMatrix' member to 'mWorldViewITMatrix'
-        mWorldITMatrix = vsProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_INVERSE_TRANSPOSE_WORLDVIEW_MATRIX, 0);
-        mViewMatrix = vsProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_VIEW_MATRIX, 0);
-        mWorldMatrix = vsProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_WORLD_MATRIX, 0);
-        
-        hasError |= !(mWorldITMatrix.get())  || !(mViewMatrix.get()) || !(mWorldMatrix.get());
+        mWorldITMatrix = vsProgram->resolveParameter(GpuProgramParameters::ACT_INVERSE_TRANSPOSE_WORLDVIEW_MATRIX);
+        mViewMatrix = vsProgram->resolveParameter(GpuProgramParameters::ACT_VIEW_MATRIX);
+        mWorldMatrix = vsProgram->resolveParameter(GpuProgramParameters::ACT_WORLD_MATRIX);
         break;
 
     case TEXCALC_ENVIRONMENT_MAP_REFLECTION:
-        mWorldMatrix = vsProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_WORLD_MATRIX, 0);
-        mWorldITMatrix = vsProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_INVERSE_TRANSPOSE_WORLD_MATRIX, 0);
-        mViewMatrix = vsProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_VIEW_MATRIX, 0);
-        
-        hasError |= !(mWorldMatrix.get()) || !(mWorldITMatrix.get()) || !(mViewMatrix.get());
+        mWorldMatrix = vsProgram->resolveParameter(GpuProgramParameters::ACT_WORLD_MATRIX);
+        mWorldITMatrix = vsProgram->resolveParameter(GpuProgramParameters::ACT_INVERSE_TRANSPOSE_WORLD_MATRIX);
+        mViewMatrix = vsProgram->resolveParameter(GpuProgramParameters::ACT_VIEW_MATRIX);
         break;
 
     case TEXCALC_PROJECTIVE_TEXTURE:
-
-        mWorldMatrix = vsProgram->resolveAutoParameterInt(GpuProgramParameters::ACT_WORLD_MATRIX, 0);
-        textureUnitParams->mTextureViewProjImageMatrix = vsProgram->resolveParameter(GCT_MATRIX_4X4, -1, (uint16)GPV_LIGHTS, "gTexViewProjImageMatrix");
-        
-        hasError |= !(mWorldMatrix.get()) || !(textureUnitParams->mTextureViewProjImageMatrix.get());
-        
-        const TextureUnitState::EffectMap&      effectMap = textureUnitParams->mTextureUnitState->getEffects(); 
-        TextureUnitState::EffectMap::const_iterator effi;
-
-        for (effi = effectMap.begin(); effi != effectMap.end(); ++effi)
-        {
-            if (effi->second.type == TextureUnitState::ET_PROJECTIVE_TEXTURE)
-            {
-                textureUnitParams->mTextureProjector = effi->second.frustum;
-                break;
-            }
-        }
-
-        hasError |= !(textureUnitParams->mTextureProjector);
+        mWorldMatrix = vsProgram->resolveParameter(GpuProgramParameters::ACT_WORLD_MATRIX);
+        textureUnitParams->mTextureViewProjImageMatrix = vsProgram->resolveParameter(
+            GpuProgramParameters::ACT_TEXTURE_VIEWPROJ_MATRIX, textureUnitParams->mTextureSamplerIndex);
         break;
     }
 
-    
-    if (hasError)
-    {
-        OGRE_EXCEPT( Exception::ERR_INTERNAL_ERROR, 
-                "Not all parameters could be constructed for the sub-render state.",
-                "FFPTexturing::resolveUniformParams" );
-    }
     return true;
 }
 
@@ -160,7 +130,6 @@ bool FFPTexturing::resolveFunctionsParams(TextureUnitParams* textureUnitParams, 
     Function* vsMain   = vsProgram->getEntryPointFunction();
     Function* psMain   = psProgram->getEntryPointFunction();
     Parameter::Content texCoordContent = Parameter::SPC_UNKNOWN;
-    bool hasError = false;
 
     switch (textureUnitParams->mTexCoordCalcMethod)
     {
@@ -173,86 +142,66 @@ bool FFPTexturing::resolveFunctionsParams(TextureUnitParams* textureUnitParams, 
             if (textureUnitParams->mTextureMatrix.get() == NULL)
                 texCoordContent = Parameter::Content(Parameter::SPC_TEXTURE_COORDINATE0 + textureUnitParams->mTextureUnitState->getTextureCoordSet());
 
-            textureUnitParams->mVSInputTexCoord = vsMain->resolveInputParameter(Parameter::SPS_TEXTURE_COORDINATES, 
-                textureUnitParams->mTextureUnitState->getTextureCoordSet(), 
-                Parameter::Content(Parameter::SPC_TEXTURE_COORDINATE0 + textureUnitParams->mTextureUnitState->getTextureCoordSet()),
-                textureUnitParams->mVSInTextureCoordinateType); 
-            hasError |= !(textureUnitParams->mVSInputTexCoord.get());
+            textureUnitParams->mVSInputTexCoord = vsMain->resolveInputParameter(
+                Parameter::Content(Parameter::SPC_TEXTURE_COORDINATE0 +
+                                   textureUnitParams->mTextureUnitState->getTextureCoordSet()),
+                textureUnitParams->mVSInTextureCoordinateType);
             break;
 
         case TEXCALC_ENVIRONMENT_MAP:
         case TEXCALC_ENVIRONMENT_MAP_PLANAR:        
         case TEXCALC_ENVIRONMENT_MAP_NORMAL:
             // Resolve vertex normal.
-            mVSInputPos = vsMain->resolveInputParameter(Parameter::SPS_POSITION, 0, Parameter::SPC_POSITION_OBJECT_SPACE, GCT_FLOAT4);
-            mVSInputNormal = vsMain->resolveInputParameter(Parameter::SPS_NORMAL, 0, Parameter::SPC_NORMAL_OBJECT_SPACE, GCT_FLOAT3);
-            hasError |= !(mVSInputNormal.get()) || !(mVSInputPos.get());
+            mVSInputPos = vsMain->resolveInputParameter(Parameter::SPC_POSITION_OBJECT_SPACE);
+            mVSInputNormal = vsMain->resolveInputParameter(Parameter::SPC_NORMAL_OBJECT_SPACE);
             break;  
 
         case TEXCALC_ENVIRONMENT_MAP_REFLECTION:
 
             // Resolve vertex normal.
-            mVSInputNormal = vsMain->resolveInputParameter(Parameter::SPS_NORMAL, 0, Parameter::SPC_NORMAL_OBJECT_SPACE, GCT_FLOAT3);
+            mVSInputNormal = vsMain->resolveInputParameter(Parameter::SPC_NORMAL_OBJECT_SPACE);
             // Resolve vertex position.
-            mVSInputPos = vsMain->resolveInputParameter(Parameter::SPS_POSITION, 0, Parameter::SPC_POSITION_OBJECT_SPACE, GCT_FLOAT4);
-            
-            hasError |= !(mVSInputNormal.get()) || !(mVSInputPos.get());
+            mVSInputPos = vsMain->resolveInputParameter(Parameter::SPC_POSITION_OBJECT_SPACE);
             break;
 
         case TEXCALC_PROJECTIVE_TEXTURE:
             // Resolve vertex position.
-            mVSInputPos = vsMain->resolveInputParameter(Parameter::SPS_POSITION, 0, Parameter::SPC_POSITION_OBJECT_SPACE, GCT_FLOAT4);
-            hasError |= !(mVSInputPos.get());
+            mVSInputPos = vsMain->resolveInputParameter(Parameter::SPC_POSITION_OBJECT_SPACE);
             break;
     }
 
     if(mIsPointSprite)
     {
-        textureUnitParams->mPSInputTexCoord =
-            psMain->resolveInputParameter(Parameter::SPS_TEXTURE_COORDINATES, 0,
-                                          Parameter::SPC_POINTSPRITE_COORDINATE, GCT_FLOAT2);
+        textureUnitParams->mPSInputTexCoord = psMain->resolveInputParameter(Parameter::SPC_POINTSPRITE_COORDINATE);
     }
     else
     {
         // Resolve vs output texture coordinates.
-        textureUnitParams->mVSOutputTexCoord = vsMain->resolveOutputParameter(Parameter::SPS_TEXTURE_COORDINATES,
-            -1,
-            texCoordContent,
-            textureUnitParams->mVSOutTextureCoordinateType);
+        textureUnitParams->mVSOutputTexCoord =
+            vsMain->resolveOutputParameter(texCoordContent, textureUnitParams->mVSOutTextureCoordinateType);
 
         // Resolve ps input texture coordinates.
-        textureUnitParams->mPSInputTexCoord = psMain->resolveInputParameter(Parameter::SPS_TEXTURE_COORDINATES,
-            textureUnitParams->mVSOutputTexCoord->getIndex(),
-            textureUnitParams->mVSOutputTexCoord->getContent(),
-            textureUnitParams->mVSOutTextureCoordinateType);
+        textureUnitParams->mPSInputTexCoord = psMain->resolveInputParameter(textureUnitParams->mVSOutputTexCoord);
     }
 
-    const ShaderParameterList& inputParams = psMain->getInputParameters();
-    const ShaderParameterList& localParams = psMain->getLocalParameters();
-
-    mPSDiffuse = psMain->getParameterByContent(inputParams, Parameter::SPC_COLOR_DIFFUSE, GCT_FLOAT4);
+    mPSDiffuse = psMain->getInputParameter(Parameter::SPC_COLOR_DIFFUSE);
     if (mPSDiffuse.get() == NULL)
     {
-        mPSDiffuse = psMain->getParameterByContent(localParams, Parameter::SPC_COLOR_DIFFUSE, GCT_FLOAT4);
+        mPSDiffuse = psMain->getLocalParameter(Parameter::SPC_COLOR_DIFFUSE);
     }
 
-    mPSSpecular = psMain->getParameterByContent(inputParams, Parameter::SPC_COLOR_SPECULAR, GCT_FLOAT4);
+    mPSSpecular = psMain->getInputParameter(Parameter::SPC_COLOR_SPECULAR);
     if (mPSSpecular.get() == NULL)
     {
-        mPSSpecular = psMain->getParameterByContent(localParams, Parameter::SPC_COLOR_SPECULAR, GCT_FLOAT4);
+        mPSSpecular = psMain->getLocalParameter(Parameter::SPC_COLOR_SPECULAR);
     }
 
-    mPSOutDiffuse = psMain->resolveOutputParameter(Parameter::SPS_COLOR, 0, Parameter::SPC_COLOR_DIFFUSE, GCT_FLOAT4);
+    mPSOutDiffuse = psMain->resolveOutputParameter(Parameter::SPC_COLOR_DIFFUSE);
 
-    hasError |= (!textureUnitParams->mVSOutputTexCoord && !mIsPointSprite) ||
-                !textureUnitParams->mPSInputTexCoord || !mPSDiffuse || !mPSSpecular ||
-                !mPSOutDiffuse;
-
-    if (hasError)
+    if (!mPSDiffuse || !mPSSpecular)
     {
-        OGRE_EXCEPT( Exception::ERR_INTERNAL_ERROR, 
-                "Not all parameters could be constructed for the sub-render state.",
-                "FFPTexturing::resolveFunctionsParams" );
+        OGRE_EXCEPT(Exception::ERR_INTERNAL_ERROR,
+                    "Not all parameters could be constructed for the sub-render state.");
     }
     return true;
 }
@@ -299,74 +248,43 @@ bool FFPTexturing::addVSFunctionInvocations(TextureUnitParams* textureUnitParams
 {
     if(mIsPointSprite)
         return true;
-
-    FunctionInvocation* texCoordCalcFunc = NULL;
-
     
+    auto stage = vsMain->getStage(FFP_VS_TEXTURING);
+
     switch (textureUnitParams->mTexCoordCalcMethod)
     {
     case TEXCALC_NONE:
-        texCoordCalcFunc =
-            OGRE_NEW AssignmentAtom(textureUnitParams->mVSOutputTexCoord,
-                                    textureUnitParams->mVSInputTexCoord, FFP_VS_TEXTURING);                    
+        stage.assign(textureUnitParams->mVSInputTexCoord, textureUnitParams->mVSOutputTexCoord);
         break;
-
     case TEXCALC_ENVIRONMENT_MAP:
     case TEXCALC_ENVIRONMENT_MAP_PLANAR:
-        texCoordCalcFunc = OGRE_NEW FunctionInvocation(FFP_FUNC_GENERATE_TEXCOORD_ENV_SPHERE,  FFP_VS_TEXTURING);
-
-        //TODO: Add field member mWorldViewITMatrix 
-        texCoordCalcFunc->pushOperand(mWorldMatrix, Operand::OPS_IN);   
-        texCoordCalcFunc->pushOperand(mViewMatrix, Operand::OPS_IN);    
-        texCoordCalcFunc->pushOperand(mWorldITMatrix, Operand::OPS_IN);
-        texCoordCalcFunc->pushOperand(mVSInputPos, Operand::OPS_IN);
-        texCoordCalcFunc->pushOperand(mVSInputNormal, Operand::OPS_IN);
-        texCoordCalcFunc->pushOperand(textureUnitParams->mVSOutputTexCoord, Operand::OPS_OUT);         
+        stage.callFunction(FFP_FUNC_GENERATE_TEXCOORD_ENV_SPHERE,
+                           {In(mWorldMatrix), In(mViewMatrix), In(mWorldITMatrix), In(mVSInputPos), In(mVSInputNormal),
+                            Out(textureUnitParams->mVSOutputTexCoord)});
         break;
-
-            
     case TEXCALC_ENVIRONMENT_MAP_REFLECTION:
-        texCoordCalcFunc = OGRE_NEW FunctionInvocation(FFP_FUNC_GENERATE_TEXCOORD_ENV_REFLECT,  FFP_VS_TEXTURING);
-
-        texCoordCalcFunc->pushOperand(mWorldMatrix, Operand::OPS_IN);
-        texCoordCalcFunc->pushOperand(mWorldITMatrix, Operand::OPS_IN);
-        texCoordCalcFunc->pushOperand(mViewMatrix, Operand::OPS_IN);            
-        texCoordCalcFunc->pushOperand(mVSInputNormal, Operand::OPS_IN); 
-        texCoordCalcFunc->pushOperand(mVSInputPos, Operand::OPS_IN);                
-        texCoordCalcFunc->pushOperand(textureUnitParams->mVSOutputTexCoord, Operand::OPS_OUT);          
+        stage.callFunction(FFP_FUNC_GENERATE_TEXCOORD_ENV_REFLECT,
+                           {In(mWorldMatrix), In(mWorldITMatrix), In(mViewMatrix), In(mVSInputNormal), In(mVSInputPos),
+                            Out(textureUnitParams->mVSOutputTexCoord)});
         break;
-
     case TEXCALC_ENVIRONMENT_MAP_NORMAL:
-        texCoordCalcFunc = OGRE_NEW FunctionInvocation(FFP_FUNC_GENERATE_TEXCOORD_ENV_NORMAL,  FFP_VS_TEXTURING);
-
-        texCoordCalcFunc->pushOperand(mWorldITMatrix, Operand::OPS_IN);
-        texCoordCalcFunc->pushOperand(mViewMatrix, Operand::OPS_IN);
-        texCoordCalcFunc->pushOperand(mVSInputNormal, Operand::OPS_IN); 
-        texCoordCalcFunc->pushOperand(textureUnitParams->mVSOutputTexCoord, Operand::OPS_OUT);          
+        stage.callFunction(
+            FFP_FUNC_GENERATE_TEXCOORD_ENV_NORMAL,
+            {In(mWorldITMatrix), In(mViewMatrix), In(mVSInputNormal), Out(textureUnitParams->mVSOutputTexCoord)});
         break;
-
     case TEXCALC_PROJECTIVE_TEXTURE:
-
-        texCoordCalcFunc = OGRE_NEW FunctionInvocation(FFP_FUNC_GENERATE_TEXCOORD_PROJECTION,  FFP_VS_TEXTURING);
-
-        texCoordCalcFunc->pushOperand(mWorldMatrix, Operand::OPS_IN);
-        texCoordCalcFunc->pushOperand(textureUnitParams->mTextureViewProjImageMatrix, Operand::OPS_IN); 
-        texCoordCalcFunc->pushOperand(mVSInputPos, Operand::OPS_IN);        
-        texCoordCalcFunc->pushOperand(textureUnitParams->mVSOutputTexCoord, Operand::OPS_OUT);
+        stage.callFunction(FFP_FUNC_GENERATE_TEXCOORD_PROJECTION,
+                           {In(mWorldMatrix), In(textureUnitParams->mTextureViewProjImageMatrix), In(mVSInputPos),
+                            Out(textureUnitParams->mVSOutputTexCoord)});
         break;
     default:
         return false;
     }
 
-    vsMain->addAtomInstance(texCoordCalcFunc);
-
     if (textureUnitParams->mTextureMatrix)
     {
-        texCoordCalcFunc = OGRE_NEW FunctionInvocation(FFP_FUNC_TRANSFORM_TEXCOORD,  FFP_VS_TEXTURING);
-        texCoordCalcFunc->pushOperand(textureUnitParams->mTextureMatrix, Operand::OPS_IN);
-        texCoordCalcFunc->pushOperand(textureUnitParams->mVSOutputTexCoord, Operand::OPS_IN);
-        texCoordCalcFunc->pushOperand(textureUnitParams->mVSOutputTexCoord, Operand::OPS_OUT);
-        vsMain->addAtomInstance(texCoordCalcFunc);
+        stage.callFunction(FFP_FUNC_TRANSFORM_TEXCOORD, textureUnitParams->mTextureMatrix,
+                           textureUnitParams->mVSOutputTexCoord, textureUnitParams->mVSOutputTexCoord);
     }
 
     return true;
@@ -382,24 +300,14 @@ bool FFPTexturing::addPSFunctionInvocations(TextureUnitParams* textureUnitParams
     
             
     // Add texture sampling code.
-    ParameterPtr texel = psMain->resolveLocalParameter(Parameter::SPS_UNKNOWN, 0, c_ParamTexelEx + StringConverter::toString(textureUnitParams->mTextureSamplerIndex), GCT_FLOAT4);
+    ParameterPtr texel = psMain->resolveLocalParameter(GCT_FLOAT4, c_ParamTexelEx + StringConverter::toString(textureUnitParams->mTextureSamplerIndex));
     addPSSampleTexelInvocation(textureUnitParams, psMain, texel, FFP_PS_SAMPLING);
 
     // Build colour argument for source1.
-    source1 = psMain->resolveLocalParameter(Parameter::SPS_UNKNOWN, 0, "source1", GCT_FLOAT4);
-        
-    addPSArgumentInvocations(psMain, source1, texel, 
-        textureUnitParams->mTextureSamplerIndex,
-        colourBlend.source1, colourBlend.colourArg1, 
-        colourBlend.alphaArg1, false, groupOrder);
+    source1 = getPSArgument(texel, colourBlend.source1, colourBlend.colourArg1, colourBlend.alphaArg1, false);
 
     // Build colour argument for source2.
-    source2 = psMain->resolveLocalParameter(Parameter::SPS_UNKNOWN, 0, "source2", GCT_FLOAT4);
-
-    addPSArgumentInvocations(psMain, source2, texel, 
-        textureUnitParams->mTextureSamplerIndex,
-        colourBlend.source2, colourBlend.colourArg2, 
-        colourBlend.alphaArg2, false, groupOrder);
+    source2 = getPSArgument(texel, colourBlend.source2, colourBlend.colourArg2, colourBlend.alphaArg2, false);
 
     bool needDifferentAlphaBlend = false;
     if (alphaBlend.operation != colourBlend.operation ||
@@ -421,16 +329,10 @@ bool FFPTexturing::addPSFunctionInvocations(TextureUnitParams* textureUnitParams
     if (needDifferentAlphaBlend)
     {
         // Build alpha argument for source1.
-        addPSArgumentInvocations(psMain, source1, texel,
-            textureUnitParams->mTextureSamplerIndex, 
-            alphaBlend.source1, alphaBlend.colourArg1, 
-            alphaBlend.alphaArg1, true, groupOrder);
+        source1 = getPSArgument(texel, alphaBlend.source1, alphaBlend.colourArg1, alphaBlend.alphaArg1, true);
 
         // Build alpha argument for source2.
-        addPSArgumentInvocations(psMain, source2, texel, 
-            textureUnitParams->mTextureSamplerIndex,
-            alphaBlend.source2, alphaBlend.colourArg2, 
-            alphaBlend.alphaArg2, true, groupOrder);
+        source2 = getPSArgument(texel, alphaBlend.source2, alphaBlend.colourArg2, alphaBlend.alphaArg2, true);
 
         // Build alpha blend
         addPSBlendInvocations(psMain, source1, source2, texel,
@@ -447,84 +349,43 @@ bool FFPTexturing::addPSFunctionInvocations(TextureUnitParams* textureUnitParams
 void FFPTexturing::addPSSampleTexelInvocation(TextureUnitParams* textureUnitParams, Function* psMain, 
                                               const ParameterPtr& texel, int groupOrder)
 {
-    FunctionInvocation* curFuncInvocation = NULL;
+    auto stage = psMain->getStage(groupOrder);
 
-    if (textureUnitParams->mTexCoordCalcMethod == TEXCALC_PROJECTIVE_TEXTURE)
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_SAMPLE_TEXTURE_PROJ, groupOrder);
-    else
-        curFuncInvocation = OGRE_NEW SampleTextureAtom(groupOrder);
+    if (textureUnitParams->mTexCoordCalcMethod != TEXCALC_PROJECTIVE_TEXTURE)
+    {
+        stage.sampleTexture(textureUnitParams->mTextureSampler, textureUnitParams->mPSInputTexCoord, texel);
+        return;
+    }
 
-    curFuncInvocation->pushOperand(textureUnitParams->mTextureSampler, Operand::OPS_IN);
-    curFuncInvocation->pushOperand(textureUnitParams->mPSInputTexCoord, Operand::OPS_IN);
-    curFuncInvocation->pushOperand(texel, Operand::OPS_OUT);
-
-    psMain->addAtomInstance(curFuncInvocation);
+    stage.callFunction(FFP_FUNC_SAMPLE_TEXTURE_PROJ, textureUnitParams->mTextureSampler,
+                       textureUnitParams->mPSInputTexCoord, texel);
 }
 
-
 //-----------------------------------------------------------------------
-void FFPTexturing::addPSArgumentInvocations(Function* psMain, 
-                                             ParameterPtr arg,
-                                             ParameterPtr texel,
-                                             int samplerIndex,
-                                             LayerBlendSource blendSrc,
-                                             const ColourValue& colourValue,
-                                             Real alphaValue,
-                                             bool isAlphaArgument,
-                                             const int groupOrder)
+ParameterPtr FFPTexturing::getPSArgument(ParameterPtr texel, LayerBlendSource blendSrc, const ColourValue& colourValue,
+                                         Real alphaValue, bool isAlphaArgument) const
 {
-    FunctionInvocation* curFuncInvocation = NULL;
-
     switch(blendSrc)
     {
     case LBS_CURRENT:
-        curFuncInvocation = OGRE_NEW AssignmentAtom(groupOrder);
-        if (samplerIndex == 0)
-            curFuncInvocation->pushOperand(mPSDiffuse, Operand::OPS_IN);
-        else
-            curFuncInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_IN);
-        curFuncInvocation->pushOperand(arg, Operand::OPS_OUT);      
-        psMain->addAtomInstance(curFuncInvocation);     
-        break;
-    case LBS_TEXTURE:       
-        curFuncInvocation = OGRE_NEW AssignmentAtom(groupOrder);
-        curFuncInvocation->pushOperand(texel, Operand::OPS_IN);
-        curFuncInvocation->pushOperand(arg, Operand::OPS_OUT);      
-        psMain->addAtomInstance(curFuncInvocation);     
-        break;
-    case LBS_DIFFUSE:       
-        curFuncInvocation = OGRE_NEW AssignmentAtom(groupOrder);
-        curFuncInvocation->pushOperand(mPSDiffuse, Operand::OPS_IN);        
-        curFuncInvocation->pushOperand(arg, Operand::OPS_OUT);      
-        psMain->addAtomInstance(curFuncInvocation);     
-        break;
-    case LBS_SPECULAR:      
-        curFuncInvocation = OGRE_NEW AssignmentAtom(groupOrder);
-        curFuncInvocation->pushOperand(mPSSpecular, Operand::OPS_IN);       
-        curFuncInvocation->pushOperand(arg, Operand::OPS_OUT);      
-        psMain->addAtomInstance(curFuncInvocation); 
-        break;
-
+        return mPSOutDiffuse;
+    case LBS_TEXTURE:
+        return texel;
+    case LBS_DIFFUSE:
+        return mPSDiffuse;
+    case LBS_SPECULAR:
+        return mPSSpecular;
     case LBS_MANUAL:
-        curFuncInvocation = OGRE_NEW AssignmentAtom(groupOrder);
-
         if (isAlphaArgument)
         {
-            curFuncInvocation->pushOperand(ParameterFactory::createConstParam(Vector4(alphaValue)), Operand::OPS_IN);
+            return ParameterFactory::createConstParam(Vector4(alphaValue));
         }
-        else
-        {
-            curFuncInvocation->pushOperand(ParameterFactory::createConstParam(Vector4((Real)colourValue.r,
-                                                                                      (Real)colourValue.g,
-                                                                                      (Real)colourValue.b,
-                                                                                      (Real)colourValue.a)),
-                                           Operand::OPS_IN);
-        }
-        
-        curFuncInvocation->pushOperand(arg, Operand::OPS_OUT);
-        psMain->addAtomInstance(curFuncInvocation); 
-        break;
+
+        return ParameterFactory::createConstParam(Vector4((Real)colourValue.r, (Real)colourValue.g,
+                                                         (Real)colourValue.b, (Real)colourValue.a));
     }
+
+    return ParameterPtr();
 }
 
 //-----------------------------------------------------------------------
@@ -535,123 +396,67 @@ void FFPTexturing::addPSBlendInvocations(Function* psMain,
                                           int samplerIndex,
                                           const LayerBlendModeEx& blendMode,
                                           const int groupOrder, 
-                                          int targetChannels)
+                                          Operand::OpMask mask)
 {
-    FunctionInvocation* curFuncInvocation = NULL;
-
+    auto stage = psMain->getStage(groupOrder);
     switch(blendMode.operation)
     {
     case LBX_SOURCE1:
-        curFuncInvocation = OGRE_NEW AssignmentAtom(groupOrder);
-        curFuncInvocation->pushOperand(arg1, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_OUT, targetChannels);        
-        psMain->addAtomInstance(curFuncInvocation);                     
+        stage.assign(In(arg1).mask(mask), Out(mPSOutDiffuse).mask(mask));
         break;
     case LBX_SOURCE2:
-        curFuncInvocation = OGRE_NEW AssignmentAtom(groupOrder);
-        curFuncInvocation->pushOperand(arg2, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_OUT, targetChannels);        
-        psMain->addAtomInstance(curFuncInvocation);                         
+        stage.assign(In(arg2).mask(mask), Out(mPSOutDiffuse).mask(mask));
         break;
     case LBX_MODULATE:
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_MODULATE, groupOrder);
-        curFuncInvocation->pushOperand(arg1, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(arg2, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_OUT, targetChannels);        
-        psMain->addAtomInstance(curFuncInvocation);         
+        stage.mul(In(arg1).mask(mask), In(arg2).mask(mask), Out(mPSOutDiffuse).mask(mask));
         break;
     case LBX_MODULATE_X2:
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_MODULATEX2, groupOrder);
-        curFuncInvocation->pushOperand(arg1, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(arg2, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_OUT, targetChannels);        
-        psMain->addAtomInstance(curFuncInvocation);         
+        stage.callFunction(FFP_FUNC_MODULATEX2, In(arg1).mask(mask), In(arg2).mask(mask),
+                           Out(mPSOutDiffuse).mask(mask));
         break;
     case LBX_MODULATE_X4:
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_MODULATEX4, groupOrder);
-        curFuncInvocation->pushOperand(arg1, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(arg2, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_OUT, targetChannels);        
-        psMain->addAtomInstance(curFuncInvocation); 
+        stage.callFunction(FFP_FUNC_MODULATEX4, In(arg1).mask(mask), In(arg2).mask(mask),
+                           Out(mPSOutDiffuse).mask(mask));
         break;
     case LBX_ADD:
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_ADD, groupOrder);
-        curFuncInvocation->pushOperand(arg1, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(arg2, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_OUT, targetChannels);        
-        psMain->addAtomInstance(curFuncInvocation);         
+        stage.add(In(arg1).mask(mask), In(arg2).mask(mask), Out(mPSOutDiffuse).mask(mask));
         break;
     case LBX_ADD_SIGNED:
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_ADDSIGNED, groupOrder);
-        curFuncInvocation->pushOperand(arg1, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(arg2, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_OUT, targetChannels);        
-        psMain->addAtomInstance(curFuncInvocation);             
+        stage.callFunction(FFP_FUNC_ADDSIGNED, In(arg1).mask(mask), In(arg2).mask(mask),
+                           Out(mPSOutDiffuse).mask(mask));
         break;
     case LBX_ADD_SMOOTH:
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_ADDSMOOTH, groupOrder);
-        curFuncInvocation->pushOperand(arg1, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(arg2, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_OUT, targetChannels);        
-        psMain->addAtomInstance(curFuncInvocation);         
+        stage.callFunction(FFP_FUNC_ADDSMOOTH, In(arg1).mask(mask), In(arg2).mask(mask),
+                           Out(mPSOutDiffuse).mask(mask));
         break;
     case LBX_SUBTRACT:
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_SUBTRACT, groupOrder);
-        curFuncInvocation->pushOperand(arg1, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(arg2, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_OUT, targetChannels);        
-        psMain->addAtomInstance(curFuncInvocation); 
+        stage.sub(In(arg1).mask(mask), In(arg2).mask(mask), Out(mPSOutDiffuse).mask(mask));
         break;
     case LBX_BLEND_DIFFUSE_ALPHA:
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_LERP, groupOrder);
-        curFuncInvocation->pushOperand(arg2, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(arg1, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(mPSDiffuse, Operand::OPS_IN, Operand::OPM_W);
-        curFuncInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_OUT, targetChannels);        
-        psMain->addAtomInstance(curFuncInvocation);     
+        stage.callFunction(FFP_FUNC_LERP, {In(arg2).mask(mask), In(arg1).mask(mask), In(mPSDiffuse).w(),
+                                           Out(mPSOutDiffuse).mask(mask)});
         break;
     case LBX_BLEND_TEXTURE_ALPHA:
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_LERP, groupOrder);
-        curFuncInvocation->pushOperand(arg2, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(arg1, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(texel, Operand::OPS_IN, Operand::OPM_W);
-        curFuncInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_OUT, targetChannels);        
-        psMain->addAtomInstance(curFuncInvocation);     
+        stage.callFunction(FFP_FUNC_LERP, {In(arg2).mask(mask), In(arg1).mask(mask), In(texel).w(),
+                                           Out(mPSOutDiffuse).mask(mask)});
         break;
     case LBX_BLEND_CURRENT_ALPHA:
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_LERP, groupOrder);
-        curFuncInvocation->pushOperand(arg2, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(arg1, Operand::OPS_IN, targetChannels);
-
-        if (samplerIndex == 0)
-            curFuncInvocation->pushOperand(mPSDiffuse, Operand::OPS_IN, Operand::OPM_W);
-        else
-            curFuncInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_IN, Operand::OPM_W);
-        curFuncInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_OUT, targetChannels);        
-        psMain->addAtomInstance(curFuncInvocation);     
+        stage.callFunction(FFP_FUNC_LERP, {In(arg2).mask(mask), In(arg1).mask(mask),
+                                           In(mPSOutDiffuse).w(),
+                                           Out(mPSOutDiffuse).mask(mask)});
         break;
     case LBX_BLEND_MANUAL:
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_LERP, groupOrder);
-        curFuncInvocation->pushOperand(arg2, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(arg1, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(ParameterFactory::createConstParam(blendMode.factor), Operand::OPS_IN);
-        curFuncInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_OUT, targetChannels);        
-        psMain->addAtomInstance(curFuncInvocation);
+        stage.callFunction(FFP_FUNC_LERP, {In(arg2).mask(mask), In(arg1).mask(mask),
+                                           In(ParameterFactory::createConstParam(blendMode.factor)),
+                                           Out(mPSOutDiffuse).mask(mask)});
         break;
     case LBX_DOTPRODUCT:
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_DOTPRODUCT, groupOrder);
-        curFuncInvocation->pushOperand(arg2, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(arg1, Operand::OPS_IN, targetChannels);      
-        curFuncInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_OUT, targetChannels);        
-        psMain->addAtomInstance(curFuncInvocation);     
+        stage.callFunction(FFP_FUNC_DOTPRODUCT, In(arg2).mask(mask), In(arg1).mask(mask),
+                           Out(mPSOutDiffuse).mask(mask));
         break;
     case LBX_BLEND_DIFFUSE_COLOUR:
-        curFuncInvocation = OGRE_NEW FunctionInvocation(FFP_FUNC_LERP, groupOrder);
-        curFuncInvocation->pushOperand(arg2, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(arg1, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(mPSDiffuse, Operand::OPS_IN, targetChannels);
-        curFuncInvocation->pushOperand(mPSOutDiffuse, Operand::OPS_OUT, targetChannels);        
-        psMain->addAtomInstance(curFuncInvocation);     
+        stage.callFunction(FFP_FUNC_LERP, {In(arg2).mask(mask), In(arg1).mask(mask),
+                                           In(mPSDiffuse).mask(mask), Out(mPSOutDiffuse).mask(mask)});
         break;
     }
 }
@@ -750,14 +555,17 @@ bool FFPTexturing::preAddToRenderState(const RenderState* renderState, Pass* src
 {
     mIsPointSprite = srcPass->getPointSpritesEnabled();
 
+    if (auto rs = Root::getSingleton().getRenderSystem())
+    {
+        if (mIsPointSprite && !rs->getCapabilities()->hasCapability(RSC_POINT_SPRITES))
+            return false;
+    }
+
     //count the number of texture units we need to process
     size_t validTexUnits = 0;
-    for (unsigned short i=0; i < srcPass->getNumTextureUnitStates(); ++i)
-    {       
-        if (isProcessingNeeded(srcPass->getTextureUnitState(i)))
-        {
-            ++validTexUnits;
-        }
+    for (const auto tu : srcPass->getTextureUnitStates())
+    {
+        validTexUnits += int(isProcessingNeeded(tu));
     }
 
     setTextureUnitCount(validTexUnits);
@@ -765,7 +573,7 @@ bool FFPTexturing::preAddToRenderState(const RenderState* renderState, Pass* src
     // Build texture stage sub states.
     for (unsigned short i=0; i < srcPass->getNumTextureUnitStates(); ++i)
     {       
-        TextureUnitState* texUnitState = srcPass->getTextureUnitState(i);                               
+        TextureUnitState* texUnitState = srcPass->getTextureUnitState(i);
 
         if (isProcessingNeeded(texUnitState))
         {
@@ -777,28 +585,6 @@ bool FFPTexturing::preAddToRenderState(const RenderState* renderState, Pass* src
 }
 
 //-----------------------------------------------------------------------
-void FFPTexturing::updateGpuProgramsParams(Renderable* rend, Pass* pass, const AutoParamDataSource* source, 
-                                              const LightList* pLightList)
-{
-    for (unsigned int i=0; i < mTextureUnitParamsList.size(); ++i)
-    {
-        TextureUnitParams* curParams = &mTextureUnitParamsList[i];
-
-        if (curParams->mTextureProjector != NULL && curParams->mTextureViewProjImageMatrix.get() != NULL)
-        {                   
-            Matrix4 matTexViewProjImage;
-
-            matTexViewProjImage = 
-                Matrix4::CLIPSPACE2DTOIMAGESPACE * 
-                curParams->mTextureProjector->getProjectionMatrixWithRSDepth() * 
-                curParams->mTextureProjector->getViewMatrix();
-
-            curParams->mTextureViewProjImageMatrix->setGpuParameter(matTexViewProjImage);
-        }
-    }
-}
-
-//-----------------------------------------------------------------------
 void FFPTexturing::setTextureUnitCount(size_t count)
 {
     mTextureUnitParamsList.resize(count);
@@ -807,8 +593,7 @@ void FFPTexturing::setTextureUnitCount(size_t count)
     {
         TextureUnitParams& curParams = mTextureUnitParamsList[i];
 
-        curParams.mTextureUnitState             = NULL;         
-        curParams.mTextureProjector             = NULL;               
+        curParams.mTextureUnitState             = NULL;
         curParams.mTextureSamplerIndex          = 0;              
         curParams.mTextureSamplerType           = GCT_SAMPLER2D;        
         curParams.mVSInTextureCoordinateType    = GCT_FLOAT2;   
@@ -819,47 +604,8 @@ void FFPTexturing::setTextureUnitCount(size_t count)
 //-----------------------------------------------------------------------
 void FFPTexturing::setTextureUnit(unsigned short index, TextureUnitState* textureUnitState)
 {
-    if (index >= mTextureUnitParamsList.size())
-    {
-        OGRE_EXCEPT(Exception::ERR_INVALIDPARAMS,
-            "FFPTexturing unit index out of bounds !!!",
-            "FFPTexturing::setTextureUnit");
-    }
-
-    if (textureUnitState->getBindingType() == TextureUnitState::BT_VERTEX)
-    {
-        OGRE_EXCEPT(Exception::ERR_INVALIDPARAMS,
-            "FFP Texture unit does not support vertex texture fetch !!!",
-            "FFPTexturing::setTextureUnit");
-    }
-    
-    if (textureUnitState->getBindingType() == TextureUnitState::BT_GEOMETRY)
-    {
-        OGRE_EXCEPT(Exception::ERR_INVALIDPARAMS,
-            "FFP Texture unit does not support geometry texture fetch !!!",
-            "FFPTexturing::setTextureUnit");
-    }
-
-    if (textureUnitState->getBindingType() == TextureUnitState::BT_COMPUTE)
-    {
-        OGRE_EXCEPT(Exception::ERR_INVALIDPARAMS,
-            "FFP Texture unit does not support comput texture fetch !!!",
-            "FFPTexturing::setTextureUnit");
-    }
-
-    if (textureUnitState->getBindingType() == TextureUnitState::BT_TESSELLATION_DOMAIN)
-    {
-        OGRE_EXCEPT(Exception::ERR_INVALIDPARAMS,
-            "FFP Texture unit does not support domain texture fetch !!!",
-            "FFPTexturing::setTextureUnit");
-    }
-
-    if (textureUnitState->getBindingType() == TextureUnitState::BT_TESSELLATION_HULL)
-    {
-        OGRE_EXCEPT(Exception::ERR_INVALIDPARAMS,
-            "FFP Texture unit does not support hull texture fetch !!!",
-            "FFPTexturing::setTextureUnit");
-    }
+    OgreAssert(index < mTextureUnitParamsList.size(), "FFPTexturing unit index out of bounds");
+    OgreAssert(textureUnitState->getBindingType() == TextureUnitState::BT_FRAGMENT, "only fragment shaders supported");
 
     TextureUnitParams& curParams = mTextureUnitParamsList[index];
 
@@ -867,7 +613,7 @@ void FFPTexturing::setTextureUnit(unsigned short index, TextureUnitState* textur
     curParams.mTextureSamplerIndex = index;
     curParams.mTextureUnitState    = textureUnitState;
 
-    bool isGLES2 = Root::getSingletonPtr()->getRenderSystem()->getName().find("OpenGL ES 2") != String::npos;
+    bool isGLES2 = ShaderGenerator::getSingleton().getTargetLanguage() == "glsles";
 
     switch (curParams.mTextureUnitState->getTextureType())
     {
@@ -905,6 +651,14 @@ void FFPTexturing::setTextureUnit(unsigned short index, TextureUnitState* textur
 
      curParams.mVSOutTextureCoordinateType = curParams.mVSInTextureCoordinateType;
      curParams.mTexCoordCalcMethod = getTexCalcMethod(curParams.mTextureUnitState);
+
+    // let TexCalcMethod override texture type, as it might be wrong for
+    // content_type shadow & content_type compositor
+    if (curParams.mTexCoordCalcMethod == TEXCALC_ENVIRONMENT_MAP_REFLECTION)
+    {
+        curParams.mVSOutTextureCoordinateType = GCT_FLOAT3;
+        curParams.mTextureSamplerType = GCT_SAMPLERCUBE;
+    }
 
      if (curParams.mTexCoordCalcMethod == TEXCALC_PROJECTIVE_TEXTURE)
          curParams.mVSOutTextureCoordinateType = GCT_FLOAT3;    

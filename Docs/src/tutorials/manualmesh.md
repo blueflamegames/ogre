@@ -37,7 +37,7 @@ We start by creating a Mesh object. As this is a manual Mesh, we have to set the
 ```cpp
 using namespace Ogre;
 
-        MeshPtr mesh = MeshManager::getSingleton().createManual(yourMeshName, "General");
+        MeshPtr mesh = MeshManager::getSingleton().createManual(yourMeshName, RGN_DEFAULT);
         mesh->_setBounds(AxisAlignedBox({-100,-100,0}, {100,100,0});
 ```
 
@@ -66,4 +66,12 @@ Finally we create the Ogre::SubMesh that will be ultimately rendered.
 
 @snippet OgreMain/src/OgrePrefabFactory.cpp sub_mesh
 
-Note that while our VertexBuffer is shared, the IndexBuffer is not. This allows rendering different faces of the same object using different Materials. Here each SubMesh links the faces (IndexBuffer) to the according material.
+Note that while our VertexBuffer is shared, the IndexBuffer is not. This allows rendering different faces of the same object using different Materials. Here, each SubMesh links the faces (IndexBuffer) to the according material.
+
+Finally, we have to update the loading state of the mesh as
+```cpp
+        mesh->load();
+```
+If you have registered a Ogre::ManualResourceLoader, the resource loading would only happen now.
+
+@note Using the Ogre::ManualResourceLoader is highly recommended. It allows lazy-loading the data on demand as well as unloading  and re-loading resources when running out of memory.

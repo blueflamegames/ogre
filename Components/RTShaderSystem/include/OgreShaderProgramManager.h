@@ -78,17 +78,10 @@ public:
     /// @copydoc Singleton::getSingleton()
     static ProgramManager* getSingletonPtr();
 
-    /** Acquire CPU/GPU programs set associated with the given render state and bind them to the pass.
-    @param pass The pass to bind the programs to.
-    @param renderState The render state that describes the program that need to be generated.
+    /** Release CPU/GPU programs set associated with the given ProgramSet
+    @param programSet The ProgramSet holds the programs.
     */
-    void acquirePrograms(Pass* pass, TargetRenderState* renderState);
-
-    /** Release CPU/GPU programs set associated with the given render state and pass.
-    @param pass The pass to release the programs from.
-    @param renderState The render state holds the programs.
-    */
-    void releasePrograms(Pass* pass, TargetRenderState* renderState);
+    void releasePrograms(const ProgramSet* programSet);
 
     /** Flush the local GPU programs cache.
     */
@@ -144,14 +137,15 @@ protected:
     /** Create GPU programs for the given program set based on the CPU programs it contains.
     @param programSet The program set container.
     */
-    bool createGpuPrograms(ProgramSet* programSet);
+    void createGpuPrograms(ProgramSet* programSet);
         
     /** 
     Generates a unique hash from a string
-    @param programString string to generate a hash value for
+    @param programString source code to generate a hash value for
+    @param defines defines for the final source code
     @return A string representing a 128 bit hash value of the original string
     */
-    static String generateHash(const String& programString);
+    static String generateHash(const String& programString, const String& defines);
 
     /** Create GPU program based on the give CPU program.
     @param shaderProgram The CPU program instance.
@@ -165,7 +159,6 @@ protected:
         ProgramWriter* programWriter,
         const String& language,
         const String& profiles,
-        const StringVector& profilesList,
         const String& cachePath);
 
     /** 
@@ -196,16 +189,7 @@ protected:
     /** Fix the input of the pixel shader to be the same as the output of the vertex shader */
     void synchronizePixelnToBeVertexOut(ProgramSet* programSet);
 
-    /** Bind the uniform parameters of a given CPU and GPU program set. */
-    void bindUniformParameters(Program* pCpuProgram, const GpuProgramParametersSharedPtr& passParams);
-
-
 protected:
-    
-
-protected:
-    // CPU programs list.                   
-    ProgramList mCpuProgramsList;
     // Map between target language and shader program writer.                   
     ProgramWriterMap mProgramWritersMap;
     // Map between target language and shader program processor.    

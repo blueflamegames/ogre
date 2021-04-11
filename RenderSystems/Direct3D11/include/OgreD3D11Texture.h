@@ -31,15 +31,10 @@ THE SOFTWARE.
 #include "OgreD3D11Prerequisites.h"
 #include "OgreD3D11Device.h"
 #include "OgreD3D11DeviceResource.h"
+#include "OgreD3D11RenderTarget.h"
 #include "OgreTexture.h"
 #include "OgreRenderTexture.h"
 #include "OgreSharedPtr.h"
-
-#if OGRE_PLATFORM == OGRE_PLATFORM_WIN32 && !defined(_WIN32_WINNT_WIN8)
-    #ifndef USE_D3DX11_LIBRARY
-        #define USE_D3DX11_LIBRARY
-    #endif
-#endif
 
 namespace Ogre {
 	/** Specialisation of Texture for D3D11 */
@@ -60,7 +55,7 @@ namespace Ogre {
 
 		ID3D11Resource *getTextureResource() { assert(mpTex); return mpTex.Get(); }
 		/// retrieves a pointer to the actual texture
-		ID3D11ShaderResourceView *getTexture() { assert(mpShaderResourceView); return mpShaderResourceView.Get(); }
+		ID3D11ShaderResourceView *getSrvView() { assert(mpShaderResourceView); return mpShaderResourceView.Get(); }
 		D3D11_SHADER_RESOURCE_VIEW_DESC getShaderResourceViewDesc() const { return mSRVDesc; }
 
 		ID3D11Texture1D * GetTex1D() { return mp1DTex.Get(); };
@@ -73,9 +68,6 @@ namespace Ogre {
 		TextureUsage _getTextureUsage() { return static_cast<TextureUsage>(mUsage); }
 
     protected:
-        // needed to store data between prepareImpl and loadImpl
-        typedef SharedPtr<std::vector<MemoryDataStreamPtr> > LoadedStreams;
-
         template<typename fromtype, typename totype>
         void _queryInterface(const ComPtr<fromtype>& from, ComPtr<totype> *to)
         {
@@ -89,15 +81,9 @@ namespace Ogre {
                     "D3D11Texture::_queryInterface" );
             }
         }
-#ifdef USE_D3DX11_LIBRARY       
-        void _loadDDS(DataStreamPtr &dstream);
-#endif
         void _create1DResourceView();
         void _create2DResourceView();
         void _create3DResourceView();
-
-        /// internal method, load a normal texture
-        void _loadTex(LoadedStreams & loadedStreams);
 
         /// internal method, create a blank normal 1D Dtexture
         void _create1DTex();
@@ -126,23 +112,8 @@ namespace Ogre {
         void notifyDeviceLost(D3D11Device* device);
         void notifyDeviceRestored(D3D11Device* device);
 
-        /// @copydoc Resource::prepareImpl
-        void prepareImpl(void);
-        /// @copydoc Resource::unprepareImpl
-        void unprepareImpl(void);
         /// overridden from Resource
         void loadImpl();
-        /// overridden from Resource
-        void postLoadImpl();
-
-        /** Vector of pointers to streams that were pulled from disk by
-            prepareImpl  but have yet to be pushed into texture memory
-            by loadImpl.  Should be cleared on load and on unprepare.
-        */
-        LoadedStreams mLoadedStreams;
-        LoadedStreams _prepareNormTex();
-        LoadedStreams _prepareVolumeTex();
-        LoadedStreams _prepareCubeTex();
 
     protected:
         D3D11Device&	mDevice;
@@ -163,7 +134,7 @@ namespace Ogre {
 
     /// RenderTexture implementation for D3D11
     class _OgreD3D11Export D3D11RenderTexture
-        : public RenderTexture
+        : public RenderTexture, public D3D11RenderTarget
         , protected D3D11DeviceResource
     {
         D3D11Device & mDevice;
@@ -174,7 +145,9 @@ namespace Ogre {
 
         void rebind(D3D11HardwarePixelBuffer *buffer);
 
-        virtual void getCustomAttribute( const String& name, void *pData );
+        virtual uint getNumberOfViews() const;
+        virtual ID3D11Texture2D* getSurface(uint index = 0) const;
+        virtual ID3D11RenderTargetView* getRenderTargetView(uint index = 0) const;
 
         bool requiresTextureFlipping() const { return false; }
 

@@ -145,11 +145,7 @@ namespace Ogre {
 
         // Upfront, lets check whether we have vertex program capability
         RenderSystem* rend = Root::getSingleton().getRenderSystem();
-        bool useVertexPrograms = false;
-        if (rend && rend->getCapabilities()->hasCapability(RSC_VERTEX_PROGRAM))
-        {
-            useVertexPrograms = true;
-        }
+        bool useVertexPrograms = rend;
 
 
         // Look for a position element
@@ -465,14 +461,10 @@ namespace Ogre {
         for (unsigned short b = 0; b <= newDeclaration->getMaxSource(); ++b)
         {
             VertexDeclaration::VertexElementList destElems = newDeclaration->findElementsBySource(b);
-            // Initialise with most restrictive version 
-            // (not really a usable option, but these flags will be removed)
-            HardwareBuffer::Usage final = static_cast<HardwareBuffer::Usage>(
-                HardwareBuffer::HBU_STATIC_WRITE_ONLY | HardwareBuffer::HBU_DISCARDABLE);
-            VertexDeclaration::VertexElementList::iterator v;
-            for (v = destElems.begin(); v != destElems.end(); ++v)
+            // Initialise with most restrictive version
+            int final = HardwareBuffer::HBU_STATIC_WRITE_ONLY;
+            for (VertexElement& destelem : destElems)
             {
-                VertexElement& destelem = *v;
                 // get source
                 const VertexElement* srcelem =
                     vertexDeclaration->findElementBySemantic(
@@ -484,27 +476,17 @@ namespace Ogre {
                 if (srcbuf->getUsage() & HardwareBuffer::HBU_DYNAMIC)
                 {
                     // remove static
-                    final = static_cast<HardwareBuffer::Usage>(
-                        final & ~HardwareBuffer::HBU_STATIC);
+                    final &= ~HardwareBuffer::HBU_STATIC;
                     // add dynamic
-                    final = static_cast<HardwareBuffer::Usage>(
-                        final | HardwareBuffer::HBU_DYNAMIC);
+                    final |= HardwareBuffer::HBU_DYNAMIC;
                 }
-                if (!(srcbuf->getUsage() & HardwareBuffer::HBU_WRITE_ONLY))
+                if (!(srcbuf->getUsage() & HBU_DETAIL_WRITE_ONLY))
                 {
                     // remove write only
-                    final = static_cast<HardwareBuffer::Usage>(
-                        final & ~HardwareBuffer::HBU_WRITE_ONLY);
+                    final &= ~HBU_DETAIL_WRITE_ONLY;
                 }
-                if (!(srcbuf->getUsage() & HardwareBuffer::HBU_DISCARDABLE))
-                {
-                    // remove discardable
-                    final = static_cast<HardwareBuffer::Usage>(
-                        final & ~HardwareBuffer::HBU_DISCARDABLE);
-                }
-                
             }
-            usages.push_back(final);
+            usages.push_back(static_cast<HardwareBuffer::Usage>(final));
         }
         // Call specific method
         reorganiseBuffers(newDeclaration, usages, mgr);
@@ -585,7 +567,7 @@ namespace Ogre {
     void VertexData::convertPackedColour(
         VertexElementType srcType, VertexElementType destType)
     {
-        if (destType != VET_COLOUR_ABGR && destType != VET_COLOUR_ARGB)
+        if (destType != VET_COLOUR_ABGR && destType != VET_COLOUR_ARGB && destType != VET_UBYTE4_NORM)
         {
             OGRE_EXCEPT(Exception::ERR_INVALIDPARAMS,
                 "Invalid destType parameter", "VertexData::convertPackedColour");
@@ -628,6 +610,11 @@ namespace Ogre {
                         VertexElement& elem = *elemi;
                         VertexElementType currType = (elem.getType() == VET_COLOUR) ?
                             srcType : elem.getType();
+
+                        // only rename, byte order is the same
+                        if(currType == VET_COLOUR_ABGR && destType == VET_UBYTE4_NORM)
+                            continue;
+
                         if (elem.getType() == VET_COLOUR || 
                             ((elem.getType() == VET_COLOUR_ABGR || elem.getType() == VET_COLOUR_ARGB) 
                             && elem.getType() != destType))
@@ -759,6 +746,13 @@ namespace Ogre {
         inline Triangle( const Triangle& t )
             : a( t.a ), b( t.b ), c( t.c )
         {
+        }
+
+        inline Triangle& operator=(const Triangle& rhs) {
+            a = rhs.a;
+            b = rhs.b;
+            c = rhs.c;
+            return *this;
         }
 
         inline bool sharesEdge(const Triangle& t) const

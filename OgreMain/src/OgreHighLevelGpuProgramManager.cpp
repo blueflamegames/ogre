@@ -86,17 +86,12 @@ namespace Ogre {
         { 
             return sNullLang;
         }
-        HighLevelGpuProgram* create(ResourceManager* creator, 
+        GpuProgram* create(ResourceManager* creator,
             const String& name, ResourceHandle handle,
             const String& group, bool isManual, ManualResourceLoader* loader)
         {
             return OGRE_NEW NullProgram(creator, name, handle, group, isManual, loader);
         }
-        void destroy(HighLevelGpuProgram* prog)
-        {
-            OGRE_DELETE prog;
-        }
-
     };
     //-----------------------------------------------------------------------
     template<> HighLevelGpuProgramManager* 
@@ -159,12 +154,9 @@ namespace Ogre {
         return i->second;
     }
     //---------------------------------------------------------------------
-    bool HighLevelGpuProgramManager::isLanguageSupported(const String& lang)
+    bool HighLevelGpuProgramManager::isLanguageSupported(const String& lang) const
     {
-        FactoryMap::iterator i = mFactories.find(lang);
-
-        return i != mFactories.end();
-
+        return mFactories.find(lang) != mFactories.end();
     }
     //---------------------------------------------------------------------------
     Resource* HighLevelGpuProgramManager::createImpl(const String& name, ResourceHandle handle, 
@@ -193,8 +185,7 @@ namespace Ogre {
             const String& name, const String& groupName, 
             const String& language, GpuProgramType gptype)
     {
-        HighLevelGpuProgram* prg =
-            getFactory(language)->create(this, name, getNextHandle(), groupName, false, 0);
+        GpuProgram* prg = getFactory(language)->create(this, name, getNextHandle(), groupName, false, 0);
         prg->setType(gptype);
         prg->setSyntaxCode(language);
 

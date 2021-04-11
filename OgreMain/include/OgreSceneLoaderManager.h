@@ -12,8 +12,7 @@ namespace Ogre {
     /** \addtogroup Resources
     *  @{
     */
-    /** This class defines an interface for registering and using SceneLoaders.
-    */
+    /// @deprecated use @ref SceneNode::loadChildren instead
     class _OgreExport SceneLoaderManager : public Singleton<SceneLoaderManager>
     {
     public:
@@ -52,10 +51,10 @@ namespace Ogre {
         */
         void load(DataStreamPtr& stream, const String& groupName, SceneNode *rootNode);
         
-        /// @copydoc Singleton::getSingleton()
-        static SceneLoaderManager& getSingleton(void);
-        /// @copydoc Singleton::getSingleton()
-        static SceneLoaderManager* getSingletonPtr(void);
+        /// @deprecated use @ref SceneNode::loadChildren instead
+        OGRE_DEPRECATED static SceneLoaderManager& getSingleton(void);
+        /// @deprecated use @ref SceneNode::loadChildren instead
+        OGRE_DEPRECATED static SceneLoaderManager* getSingletonPtr(void);
         
     protected:
         /// Struct for storing data about SceneLoaders internally

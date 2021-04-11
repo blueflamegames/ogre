@@ -80,17 +80,6 @@ protected:
         delete mSystem;
     }
     
-    bool frameRenderingQueued(const FrameEvent& evt)
-    {
-        if( SdkSample::frameRenderingQueued(evt) == false )
-            return false;
-        SharedData::getSingleton().iLastFrameTime = evt.timeSinceLastFrame;
-        
-        if (SharedData::getSingleton().mMLAnimState)
-            SharedData::getSingleton().mMLAnimState->addTime(evt.timeSinceLastFrame);
-        return true;
-    }
-    
     void setupControls()
     {
         mTrayMgr->showCursor();
@@ -244,22 +233,8 @@ protected:
         
     }
 
-    StringVector getRequiredPlugins()
-    {
-        StringVector names;
-        if (!GpuProgramManager::getSingleton().isSyntaxSupported("glsles") && !GpuProgramManager::getSingleton().isSyntaxSupported("glsl150"))
-            names.push_back("Cg Program Manager");
-        return names;
-    }
-
     void testCapabilities(const RenderSystemCapabilities* caps)
     {
-        if (!caps->hasCapability(RSC_VERTEX_PROGRAM) || !(caps->hasCapability(RSC_FRAGMENT_PROGRAM)))
-        {
-            OGRE_EXCEPT(Exception::ERR_NOT_IMPLEMENTED, "Your card does not support vertex and fragment programs, so cannot "
-                        "run this demo. Sorry!", 
-                        "DeferredShading::testCapabilities");
-        }
         if (caps->getNumMultiRenderTargets()<2)
         {
             OGRE_EXCEPT(Exception::ERR_NOT_IMPLEMENTED, "Your card does not support at least two simultaneous render targets, so cannot "
@@ -267,15 +242,7 @@ protected:
                         "DeferredShading::testCapabilities");
         }
 
-        if (!GpuProgramManager::getSingleton().isSyntaxSupported("vs_1_1") &&
-            !GpuProgramManager::getSingleton().isSyntaxSupported("arbvp1") &&
-            !GpuProgramManager::getSingleton().isSyntaxSupported("vs_4_0") &&
-            !GpuProgramManager::getSingleton().isSyntaxSupported("glsl300es") &&
-            !GpuProgramManager::getSingleton().isSyntaxSupported("glsl150"))
-        {
-            OGRE_EXCEPT(Exception::ERR_NOT_IMPLEMENTED, "Your graphics card does not support advanced vertex"
-                        " programs, so you cannot run this sample. Sorry!", "DeferredShading::testCapabilities");
-        }
+        requireMaterial("DeferredShading/AmbientLight");
     }
 
     // Just override the mandatory create scene method
@@ -293,12 +260,15 @@ protected:
         Light* l1 = mSceneMgr->createLight();
         l1->setType(Light::LT_DIRECTIONAL);
         l1->setDiffuseColour(0.5f, 0.45f, 0.1f);
-        l1->setDirection(1, -0.5, -0.2);
         l1->setShadowFarClipDistance(250);
         l1->setShadowFarDistance(75);
         //Turn this on to have the directional light cast shadows
         l1->setCastShadows(false);
         
+        auto ln = mSceneMgr->getRootSceneNode()->createChildSceneNode();
+        ln->setDirection(Vector3(1, -0.5, -0.2));
+        ln->attachObject(l1);
+
         mCameraNode->setPosition(25, 5, 0);
         mCameraNode->lookAt(Vector3::ZERO, Node::TS_PARENT);
         mCamera->setFarClipDistance(1000.0);
@@ -473,8 +443,11 @@ protected:
             }
         }
         // Create a new animation state to track this
-        SharedData::getSingleton().mMLAnimState = mSceneMgr->createAnimationState("LightSwarmTrack");
-        SharedData::getSingleton().mMLAnimState->setEnabled(true);
+        auto animState = mSceneMgr->createAnimationState("LightSwarmTrack");
+        animState->setEnabled(true);
+
+        auto& controllerMgr = ControllerManager::getSingleton();
+        controllerMgr.createFrameTimePassthroughController(AnimationStateControllerValue::create(animState, true));
         
         /*Light* spotLight = mSceneMgr->createLight("Spotlight1");
          spotLight->setType(Light::LT_SPOTLIGHT);

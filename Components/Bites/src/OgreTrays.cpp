@@ -7,14 +7,11 @@
 
 #include "OgreTrays.h"
 
-#if OGRE_UNICODE_SUPPORT
-    #define DISPLAY_STRING_TO_STRING(DS) (DS.asUTF8())
-#else
-    #define DISPLAY_STRING_TO_STRING(DS) (DS)
-#endif
-
 namespace OgreBites
 {
+
+// maximal rate to update widgets internally
+static unsigned FRAME_UPDATE_DELAY = 250; // ms
 
 Widget::Widget()
 {
@@ -35,11 +32,9 @@ void Widget::nukeOverlayElement(Ogre::OverlayElement *element)
     if (container)
     {
         std::vector<Ogre::OverlayElement*> toDelete;
-
-        Ogre::OverlayContainer::ChildIterator children = container->getChildIterator();
-        while (children.hasMoreElements())
+        for (const auto& p : container->getChildren())
         {
-            toDelete.push_back(children.getNext());
+            toDelete.push_back(p.second);
         }
 
         for (unsigned int i = 0; i < toDelete.size(); i++)
@@ -77,7 +72,7 @@ Ogre::Vector2 Widget::cursorOffset(Ogre::OverlayElement *element, const Ogre::Ve
 Ogre::Real Widget::getCaptionWidth(const Ogre::DisplayString &caption, Ogre::TextAreaOverlayElement *area)
 {
     Ogre::FontPtr font = area->getFont();
-    Ogre::String current = DISPLAY_STRING_TO_STRING(caption);
+    Ogre::String current = caption.asUTF8();
     Ogre::Real lineWidth = 0;
 
     for (unsigned int i = 0; i < current.length(); i++)
@@ -99,7 +94,7 @@ Ogre::Real Widget::getCaptionWidth(const Ogre::DisplayString &caption, Ogre::Tex
 void Widget::fitCaptionToArea(const Ogre::DisplayString &caption, Ogre::TextAreaOverlayElement *area, Ogre::Real maxWidth)
 {
     Ogre::FontPtr f = area->getFont();
-    Ogre::String s = DISPLAY_STRING_TO_STRING(caption);
+    Ogre::String s = caption.asUTF8();
 
     size_t nl = s.find('\n');
     if (nl != Ogre::String::npos) s = s.substr(0, nl);
@@ -238,7 +233,7 @@ void TextBox::setText(const Ogre::DisplayString &text)
 
     Ogre::FontPtr font = mTextArea->getFont();
 
-    Ogre::String current = DISPLAY_STRING_TO_STRING(text);
+    Ogre::String current = text.asUTF8();
     bool firstWord = true;
     unsigned int lastSpace = 0;
     unsigned int lineBegin = 0;
@@ -682,7 +677,7 @@ void SelectMenu::_cursorMoved(const Ogre::Vector2 &cursorPos, float wheelDelta)
             if (newIndex != mDisplayIndex) setDisplayIndex(newIndex);
             return;
         }
-        else if(fabsf(wheelDelta) > 0.5f * 120.0f) // seems that OIS uses click == WHEEL_DELTA == 120 for all platforms
+        else if(fabsf(wheelDelta) > 0.5f)
         {
             int newIndex = Ogre::Math::Clamp<int>(mDisplayIndex + (wheelDelta > 0 ? -1 : 1), 0, (int)(mItems.size() - mItemElements.size()));
             Ogre::Real lowerBoundary = mScrollTrack->getHeight() - mScrollHandle->getHeight();
@@ -923,6 +918,10 @@ void Slider::_cursorMoved(const Ogre::Vector2 &cursorPos, float wheelDelta)
 
         mHandle->setLeft(Ogre::Math::Clamp<int>((int)newLeft, 0, (int)rightBoundary));
         setValue(getSnappedValue(newLeft / rightBoundary));
+
+        // sync mHandle's mPixelLeft with mLeft
+        // if multiple "mouseMoved" happened during one frame, mLeft could be incorrect otherwise
+        mHandle->_update();
     }
 }
 
@@ -961,15 +960,15 @@ void ParamsPanel::setParamValue(const Ogre::DisplayString &paramName, const Ogre
 {
     for (unsigned int i = 0; i < mNames.size(); i++)
     {
-        if (mNames[i] == DISPLAY_STRING_TO_STRING(paramName))
+        if (mNames[i] == paramName.asUTF8())
         {
-            mValues[i] = DISPLAY_STRING_TO_STRING(paramValue);
+            mValues[i] = paramValue.asUTF8();
             updateText();
             return;
         }
     }
 
-    Ogre::String desc = "ParamsPanel \"" + getName() + "\" has no parameter \"" + DISPLAY_STRING_TO_STRING(paramName) + "\".";
+    Ogre::String desc = "ParamsPanel \"" + getName() + "\" has no parameter \"" + paramName.asUTF8() + "\".";
     OGRE_EXCEPT(Ogre::Exception::ERR_ITEM_NOT_FOUND, desc, "ParamsPanel::setParamValue");
 }
 
@@ -982,7 +981,7 @@ void ParamsPanel::setParamValue(unsigned int index, const Ogre::DisplayString &p
         OGRE_EXCEPT(Ogre::Exception::ERR_ITEM_NOT_FOUND, desc, "ParamsPanel::setParamValue");
     }
 
-    mValues[index] = DISPLAY_STRING_TO_STRING(paramValue);
+    mValues[index] = paramValue.asUTF8();
     updateText();
 }
 
@@ -990,10 +989,10 @@ Ogre::DisplayString ParamsPanel::getParamValue(const Ogre::DisplayString &paramN
 {
     for (unsigned int i = 0; i < mNames.size(); i++)
     {
-        if (mNames[i] == DISPLAY_STRING_TO_STRING(paramName)) return mValues[i];
+        if (mNames[i] == paramName.asUTF8()) return mValues[i];
     }
 
-    Ogre::String desc = "ParamsPanel \"" + getName() + "\" has no parameter \"" + DISPLAY_STRING_TO_STRING(paramName) + "\".";
+    Ogre::String desc = "ParamsPanel \"" + getName() + "\" has no parameter \"" + paramName.asUTF8() + "\".";
     OGRE_EXCEPT(Ogre::Exception::ERR_ITEM_NOT_FOUND, desc, "ParamsPanel::getParamValue");
     return "";
 }
@@ -1131,7 +1130,7 @@ TrayManager::TrayManager(const Ogre::String &name, Ogre::RenderWindow *window, T
     mGroupInitProportion(0.0f), mGroupLoadProportion(0.0f), mLoadInc(0.0f)
 {
     mTimer = Ogre::Root::getSingleton().getTimer();
-    mLastStatUpdateTime = 0;
+    mLastStatUpdateTime = -FRAME_UPDATE_DELAY; // update immediately on first call
 
     Ogre::OverlayManager& om = Ogre::OverlayManager::getSingleton();
 
@@ -1931,7 +1930,7 @@ void TrayManager::frameRendered(const Ogre::FrameEvent &evt)
 
 
     unsigned long currentTime = mTimer->getMilliseconds();
-    if (areFrameStatsVisible() && currentTime - mLastStatUpdateTime > 250)
+    if (areFrameStatsVisible() && currentTime - mLastStatUpdateTime >= FRAME_UPDATE_DELAY)
     {
         Ogre::RenderTarget::FrameStats stats = mWindow->getStatistics();
 
@@ -1976,7 +1975,12 @@ void TrayManager::frameRendered(const Ogre::FrameEvent &evt)
 void TrayManager::windowUpdate()
 {
 #if OGRE_PLATFORM != OGRE_PLATFORM_APPLE_IOS
-    mWindow->update();
+    unsigned long currentTime = mTimer->getMilliseconds();
+    if (currentTime - mLastStatUpdateTime >= FRAME_UPDATE_DELAY)
+    {
+        mLastStatUpdateTime = currentTime;
+        mWindow->update();
+    }
 #endif
 }
 
@@ -2008,8 +2012,7 @@ void TrayManager::buttonHit(Button *button)
 
 bool TrayManager::mousePressed(const MouseButtonEvent &evt)
 {
-    // Only process mouse buttons when stuff is visible.
-    if (!mCursorLayer->isVisible() || evt.button != BUTTON_LEFT) return false;
+    if (evt.button != BUTTON_LEFT) return false;
 
     Ogre::Vector2 cursorPos(mCursor->getLeft(), mCursor->getTop());
 
@@ -2082,8 +2085,7 @@ bool TrayManager::mousePressed(const MouseButtonEvent &evt)
 
 bool TrayManager::mouseReleased(const MouseButtonEvent &evt)
 {
-    // Only process mouse buttons when stuff is visible.
-    if (!mCursorLayer->isVisible() || evt.button != BUTTON_LEFT) return false;
+    if (evt.button != BUTTON_LEFT) return false;
 
     Ogre::Vector2 cursorPos(mCursor->getLeft(), mCursor->getTop());
 
@@ -2128,12 +2130,11 @@ bool TrayManager::mouseReleased(const MouseButtonEvent &evt)
 
 bool TrayManager::mouseMoved(const MouseMotionEvent &evt)
 {
+    // thats a separate event. Ignore for now.
+    static float wheelDelta = 0;
+
     // always keep track of the mouse pos for refreshCursor()
     mCursorPos = Ogre::Vector2(evt.x, evt.y);
-
-    if (!mCursorLayer->isVisible()) return false;   // don't process if cursor layer is invisible
-
-    float wheelDelta = 0;//evt.state.Z.rel;
     mCursor->setPosition(mCursorPos.x, mCursorPos.y);
 
     if (mExpandedMenu)   // only check top priority widget until it passes on
@@ -2169,6 +2170,16 @@ bool TrayManager::mouseMoved(const MouseMotionEvent &evt)
     }
 
     if (mTrayDrag) return true;  // don't pass this event on if we're in the middle of a drag
+    return false;
+}
+
+bool TrayManager::mouseWheelRolled(const MouseWheelEvent& evt)
+{
+    if (mExpandedMenu)
+    {
+        mExpandedMenu->_cursorMoved(mCursorPos, evt.y);
+        return true;
+    }
     return false;
 }
 

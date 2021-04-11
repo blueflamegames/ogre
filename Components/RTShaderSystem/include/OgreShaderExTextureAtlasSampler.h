@@ -154,7 +154,7 @@ public:
     /** 
     @see SubRenderState::updateGpuProgramsParams.
     */
-    virtual void updateGpuProgramsParams(Renderable* rend, Pass* pass,  const AutoParamDataSource* source,  const LightList* pLightList);
+    virtual void updateGpuProgramsParams(Renderable* rend, const Pass* pass,  const AutoParamDataSource* source,  const LightList* pLightList);
 
     /** 
     @see SubRenderState::preAddToRenderState.
@@ -273,11 +273,7 @@ public:
             information in any case.
     */
     bool addTexutreAtlasDefinition( const Ogre::String& filename, TextureAtlasTablePtr textureAtlasTable = TextureAtlasTablePtr());
-    /**
-        @overload addTexutreAtlasDefinition(const Ogre::String& filename, TextureAtlasTablePtr textureAtlasTable)
-
-        @param stream A stream to a file containing ".tai" format data
-    */
+    /// @overload
     bool addTexutreAtlasDefinition( DataStreamPtr stream, TextureAtlasTablePtr textureAtlasTable = TextureAtlasTablePtr());
 
     /**
@@ -364,7 +360,7 @@ private:
     TextureAtlasAttib mDefaultAtlasAttrib;
 };
 
-_OgreRTSSExport void operator<<(std::ostream& o, const TextureAtlasSamplerFactory::TextureAtlasAttib& tai);
+OGRE_DEPRECATED _OgreRTSSExport void operator<<(std::ostream& o, const TextureAtlasSamplerFactory::TextureAtlasAttib& tai);
 
 /** @} */
 /** @} */
